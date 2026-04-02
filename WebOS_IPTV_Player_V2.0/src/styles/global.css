@@ -1,0 +1,29 @@
+/* Reset et base globale */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background-color: #000000;
+  font-family: 'LG Smart UI', 'Segoe UI', Arial, sans-serif;
+  font-size: 16px;
+  color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Désactiver le scroll natif webOS */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: none;
+}
+
+/* Supprimer l'outline navigateur par défaut */
+*:focus {
+  outline: none;
+}

@@ -1,0 +1,18 @@
+/* Styles de focus universels pour la navigation télécommande */
+/* Classe appliquée par @noriginmedia/norigin-spatial-navigation via prop focused */
+
+.focused {
+  outline: 3px solid #00b4ff;
+  outline-offset: 2px;
+  transform: scale(1.05);
+  transition: transform 0.1s ease, outline 0.1s ease;
+  z-index: 1;
+}
+
+.focused-card {
+  outline: 3px solid #00b4ff;
+  transform: scale(1.08);
+  box-shadow: 0 0 20px rgba(0, 180, 255, 0.6);
+  transition: transform 0.1s ease;
+  z-index: 1;
+}
