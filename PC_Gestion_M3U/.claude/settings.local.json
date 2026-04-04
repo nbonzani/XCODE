@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from core.m3u_parser import parse_m3u; from core.filters import enrich_entries, apply_filters; print\\(''core/ OK''\\)\")",
+      "Bash(python -c \"from ui.channel_table import ChannelTable; from ui.filter_panel import FilterPanel; from ui.main_window import MainWindow; print\\(''''ui/ OK''''\\)\")",
+      "Bash(python main.py)",
+      "Bash(python -c \"from core.exporter import export_m3u, export_csv; from ui.main_window import MainWindow; print\\(''OK - tous les imports fonctionnent''\\)\")",
+      "Bash(pip show:*)",
+      "Bash(python -c \"from ui.main_window import MainWindow; print\\(''OK - tous les imports fonctionnent''\\)\")",
+      "Bash(python -c \"from ui.main_window import MainWindow; from ui.filter_panel import FilterPanel; from ui.vlc_player import VLCPlayer; print\\(''OK''\\)\")",
+      "Bash(timeout 10 python -c \":*)",
+      "Bash(python -c \"from ui.main_window import MainWindow; print\\(''OK''\\)\")"
+    ]
+  }
+}

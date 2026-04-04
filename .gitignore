@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environnements virtuels
+venv/
+.venv/
+env/
+
+# Configuration locale sensible (identifiants)
+**/data/config.json
+
+# Fichiers M3U téléchargés (potentiellement volumineux)
+**/data/*.m3u
+**/data/*.m3u8
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+
+# Windows
+Thumbs.db
+desktop.ini
