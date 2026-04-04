@@ -29,3 +29,6 @@ env/
 # Windows
 Thumbs.db
 desktop.ini
+# Fichiers locaux Claude Code
+.claude/
+.claudesettings.json.txt
