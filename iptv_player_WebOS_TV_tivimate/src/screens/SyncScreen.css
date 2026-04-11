@@ -1,0 +1,106 @@
+/**
+ * src/screens/SyncScreen.css
+ * Écran de chargement plein écran — LG webOS (1920×1080).
+ */
+
+/* ── Fond plein écran ────────────────────────────────────────────────────── */
+
+.sync-screen {
+  position: fixed;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  background-color: #000;
+  z-index: var(--z-player); /* au-dessus de tout le reste */
+  overflow: hidden;
+}
+
+/* ── Bloc titre (position calculée par JS, triangle wave) ────────────────── */
+
+.sync-screen__blob {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* will-change: transform optimise le rAF sur Chromium 79 (webOS 6) */
+  will-change: transform;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.sync-screen__title {
+  font-size: 32px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  max-width: 680px;
+  white-space: normal;       /* retour à la ligne si le statut est long */
+  word-break: break-word;
+  text-shadow: 0 0 40px rgba(74, 158, 255, 0.5),
+               0 2px 8px rgba(0, 0, 0, 0.8);
+}
+
+/* ── Points de chargement animés ─────────────────────────────────────────── */
+
+.sync-screen__dots {
+  display: flex;
+  gap: 10px;
+  padding-left: 4px;
+}
+
+.sync-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: var(--color-accent, #4a9eff);
+  opacity: 0.3;
+  animation: syncDotPulse 1.4s ease-in-out infinite;
+}
+
+.sync-dot--1 { animation-delay: 0s;    }
+.sync-dot--2 { animation-delay: 0.2s;  }
+.sync-dot--3 { animation-delay: 0.4s;  }
+
+@keyframes syncDotPulse {
+  0%, 80%, 100% { opacity: 0.2; transform: scale(1);    }
+  40%           { opacity: 1;   transform: scale(1.4);  }
+}
+
+/* ── Barre de progression ────────────────────────────────────────────────── */
+
+.sync-screen__progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 420px;
+}
+
+.sync-screen__progress-bar {
+  flex: 1;
+  height: 6px;
+  background-color: rgba(255,255,255,0.12);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.sync-screen__progress-fill {
+  height: 100%;
+  background-color: var(--color-accent, #4a9eff);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  box-shadow: 0 0 8px rgba(74, 158, 255, 0.7);
+}
+
+.sync-screen__progress-pct {
+  font-size: 14px;
+  color: rgba(255,255,255,0.55);
+  font-family: var(--font-family-mono);
+  white-space: nowrap;
+  min-width: 36px;
+  text-align: right;
+}
+
+/* .sync-screen__status supprimé : le statut est désormais dans le blob animé */

@@ -1,0 +1,409 @@
+/**
+ * src/screens/PlayerScreen.css
+ * Lecteur vidéo plein écran — LG webOS (1920×1080).
+ *
+ * Structure de la barre de contrôles :
+ *   .player-info-row   → titre · temps · raccourcis couleur
+ *   .player-progress   → barre de progression
+ *   .player-btn-row    → boutons d'action (gauche : nav / droite : options)
+ *   .player-btn-mode-hint → indice de navigation (mode boutons seulement)
+ */
+
+/* ── Conteneur plein écran ───────────────────────────────────────────────── */
+
+.player-screen {
+  position: fixed;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  background-color: #000;
+  z-index: var(--z-player);
+  cursor: none;
+  overflow: hidden;
+}
+
+.player-video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  object-fit: contain;
+  background-color: #000;
+}
+
+/* ── Barre de contrôles (overlay bas) ───────────────────────────────────── */
+
+.player-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  /* Dégradé du bas vers le haut pour lisibilité du texte */
+  background: linear-gradient(transparent, rgba(0,0,0,0.7) 30%, rgba(0,0,0,0.92) 100%);
+  padding: var(--space-8) var(--space-6) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  z-index: var(--z-player-controls);
+  /* Masqué par défaut */
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+.player-controls--visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  cursor: default;
+}
+
+/* ── Ligne info (titre + temps + raccourcis) ─────────────────────────────── */
+
+.player-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 28px;
+}
+
+.player-info-row__left {
+  flex: 1;
+  min-width: 0; /* permet text-overflow sur l'enfant */
+}
+
+.player-info-row__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-shrink: 0;
+}
+
+.player-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.player-playlist-indicator {
+  font-size: var(--font-size-sm);
+  color: rgba(255,255,255,0.55);
+  font-weight: var(--font-weight-regular);
+}
+
+.player-time {
+  font-size: var(--font-size-sm);
+  color: rgba(255,255,255,0.8);
+  font-family: var(--font-family-mono);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.player-color-hints {
+  display: flex;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.player-color-hint {
+  font-size: var(--font-size-xs);
+  color: rgba(255,255,255,0.6);
+  white-space: nowrap;
+}
+
+/* ── Barre de progression ────────────────────────────────────────────────── */
+
+.player-progress {
+  position: relative;
+  height: 5px;
+  background-color: rgba(255,255,255,0.2);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  margin: var(--space-1) 0;
+  transition: height 0.15s ease;
+}
+
+.player-progress:hover {
+  height: 7px;
+}
+
+.player-progress__fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background-color: var(--color-accent);
+  border-radius: var(--radius-full);
+  pointer-events: none;
+}
+
+.player-progress__thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  background-color: #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: transform 0.12s ease;
+  box-shadow: 0 0 4px rgba(0,0,0,0.6);
+}
+
+.player-progress:hover .player-progress__thumb {
+  transform: translate(-50%, -50%) scale(1.35);
+}
+
+/* ── Ligne de boutons ────────────────────────────────────────────────────── */
+
+.player-btn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+
+/* Groupe gauche : ⏮ ▶ ⏭ */
+.player-btn-row__left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Groupe droit : Audio · Sous-titres · Son · Fermer */
+.player-btn-row__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Mode boutons actif : fond légèrement surlighné + séparateur haut */
+.player-btn-row--active {
+  background-color: rgba(255,255,255,0.05);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid rgba(255,255,255,0.18);
+}
+
+/* ── Boutons ─────────────────────────────────────────────────────────────── */
+
+.player-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.9);
+  font-size: var(--font-size-xl);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+  transition: background-color 0.12s ease, transform 0.12s ease, color 0.12s ease;
+}
+
+.player-btn:focus {
+  outline: 2px solid rgba(255,255,255,0.65);
+  outline-offset: 2px;
+  background-color: rgba(255,255,255,0.12);
+}
+
+/* Bouton sélectionné en mode BOUTONS (navigation ←→) */
+.player-btn--focused {
+  outline: 3px solid #fff !important;
+  outline-offset: 3px !important;
+  background-color: rgba(255,255,255,0.22) !important;
+  transform: scale(1.15) !important;
+}
+
+/* Bouton lecture : légèrement plus grand */
+.player-btn--play {
+  font-size: var(--font-size-2xl);
+}
+
+/* Bouton désactivé (⏮ au début, ⏭ à la fin) */
+.player-btn--disabled {
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+/* Bouton son coupé */
+.player-btn--muted {
+  color: rgba(255,80,80,0.85);
+}
+
+/* Bouton fermer */
+.player-btn--close {
+  font-size: var(--font-size-lg);
+  color: rgba(255,255,255,0.6);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-3);
+}
+
+.player-btn--close:focus {
+  background-color: #c0392b;
+  border-color: #e74c3c;
+  color: #fff;
+}
+
+.player-btn--close.player-btn--focused {
+  background-color: #c0392b !important;
+  border-color: #e74c3c !important;
+  color: #fff !important;
+}
+
+/* ── Boutons de piste (audio / sous-titres) ──────────────────────────────── */
+
+.player-btn--track {
+  font-size: var(--font-size-sm);
+  background-color: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-3);
+  letter-spacing: 0.03em;
+  color: rgba(255,255,255,0.85);
+}
+
+/* Sous-titres activés → teinte verte */
+.player-btn--track-on {
+  background-color: rgba(46, 160, 67, 0.25) !important;
+  border-color: rgba(46, 200, 67, 0.5) !important;
+  color: #6dda8a !important;
+}
+
+/* Menu ouvert → teinte bleue */
+.player-btn--active {
+  background-color: rgba(74, 158, 255, 0.3) !important;
+  border-color: rgba(74, 158, 255, 0.7) !important;
+  color: #8ec8ff !important;
+}
+
+/* ── Indice mode boutons ──────────────────────────────────────────────────── */
+
+.player-btn-mode-hint {
+  text-align: center;
+  font-size: var(--font-size-xs);
+  color: rgba(255,255,255,0.4);
+  padding-bottom: var(--space-1);
+  letter-spacing: 0.05em;
+}
+
+/* ── Menus de sélection (audio + sous-titres) ────────────────────────────── */
+
+.player-track-menu {
+  position: absolute;
+  bottom: 130px;
+  min-width: 260px;
+  max-width: 400px;
+  background-color: rgba(8, 8, 14, 0.97);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-top: 2px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.85);
+  z-index: calc(var(--z-player-controls) + 1);
+  overflow: hidden;
+}
+
+/* Menu audio : ancré à gauche des boutons droits */
+.player-track-menu--left {
+  right: 300px;
+}
+
+/* Menu sous-titres : ancré sur les boutons droits */
+.player-track-menu--right {
+  right: 36px;
+}
+
+.player-track-menu__title {
+  padding: 10px 16px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.player-track-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  font-size: var(--font-size-md);
+  color: rgba(255,255,255,0.8);
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.player-track-menu__item:hover {
+  background-color: rgba(255,255,255,0.06);
+}
+
+.player-track-menu__item--active {
+  color: #fff;
+  font-weight: var(--font-weight-semibold);
+}
+
+.player-track-menu__item--focused {
+  background-color: rgba(74, 158, 255, 0.3);
+  color: #fff;
+}
+
+.player-track-menu__item--active.player-track-menu__item--focused {
+  background-color: rgba(74, 158, 255, 0.45);
+}
+
+.player-track-menu__check {
+  width: 18px;
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.player-track-menu__item-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Badges Forcés / Complets ────────────────────────────────────────────── */
+
+.player-track-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+/* Forcés = orange (sous-titrage partiel, passages étrangers) */
+.player-track-badge--forced {
+  background-color: rgba(251, 146, 60, 0.2);
+  color: #fb923c;
+  border: 1px solid rgba(251, 146, 60, 0.35);
+}
+
+/* Complets = bleu (transcription intégrale) */
+.player-track-badge--full {
+  background-color: rgba(74, 158, 255, 0.15);
+  color: #74aaff;
+  border: 1px solid rgba(74, 158, 255, 0.3);
+}
+
+.player-track-menu__hint {
+  padding: 7px 16px;
+  font-size: var(--font-size-xs);
+  color: rgba(255,255,255,0.3);
+  border-top: 1px solid rgba(255,255,255,0.07);
+  text-align: center;
+  letter-spacing: 0.04em;
+}

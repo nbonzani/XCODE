@@ -1,0 +1,605 @@
+/**
+ * src/screens/HomeScreen.css — layout TiviMate
+ */
+
+/* ── Conteneur principal ─────────────────────────────────────────────────── */
+
+.home-screen {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #141414;
+  overflow: hidden;
+  position: relative; /* ancrage pour la sidebar absolute */
+}
+
+/* ── Backdrop sidebar ────────────────────────────────────────────────────── */
+
+.sidebar-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: calc(var(--z-overlay) - 1);
+  animation: fadeIn 150ms ease-out;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+
+.toolbar {
+  height: 72px;
+  background-color: #0e0e14;
+  border-bottom: 1px solid #1e1e2a;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.toolbar__search {
+  display: flex;
+  align-items: center;
+  background-color: #1c1c26;
+  border: 1.5px solid #2a2a3a;
+  border-radius: var(--radius-full);
+  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  flex: 0 0 320px;
+  transition: border-color var(--transition-fast);
+  height: 44px;
+}
+
+.toolbar__search:focus-within {
+  border-color: var(--color-accent);
+}
+
+.toolbar__search-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.toolbar__search-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.toolbar__search-btn:focus {
+  outline: none;
+  color: var(--color-text-primary);
+}
+
+.toolbar__search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  padding: 0;
+  outline: none;
+}
+
+.toolbar__search-input::placeholder {
+  color: var(--color-text-placeholder);
+}
+
+.toolbar__spacer { flex: 1; }
+
+.toolbar__btn {
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 10px var(--space-3);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.toolbar__btn:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  transform: scale(1.04);
+}
+
+.toolbar__btn:disabled { opacity: 0.4; pointer-events: none; }
+
+.toolbar__btn--sync {
+  background-color: var(--color-accent);
+  color: #fff;
+}
+
+.toolbar__btn--clear {
+  background-color: #1c1c26;
+  color: var(--color-text-secondary);
+  border: 1.5px solid #2a2a3a;
+}
+
+.toolbar__btn--clear:focus {
+  border-color: var(--color-error);
+  outline-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.toolbar__btn--settings {
+  background-color: #1c1c26;
+  color: var(--color-text-primary);
+  border: 1.5px solid #2a2a3a;
+}
+
+.toolbar__spinner {
+  display: flex;
+  align-items: center;
+}
+
+/* ── TabBar ──────────────────────────────────────────────────────────────── */
+
+.tab-bar {
+  display: flex;
+  background-color: #0e0e14;
+  border-bottom: 1px solid #1e1e2a;
+  flex-shrink: 0;
+  padding: 0 var(--space-3);
+}
+
+.tab-item {
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-regular);
+  color: #666680;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 16px var(--space-4);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+  outline: none;
+}
+
+.tab-item.active {
+  color: #fff;
+  font-weight: var(--font-weight-semibold);
+  border-bottom-color: var(--color-accent);
+}
+
+.tab-item:focus {
+  color: #fff;
+  background-color: rgba(74, 158, 255, 0.08);
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* ── Bandeau de reprise série ────────────────────────────────────────────── */
+
+.home-screen__resume {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: linear-gradient(90deg, rgba(74,158,255,0.12), transparent);
+  border-bottom: 1px solid #1e1e2a;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.home-screen__resume:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+  background: rgba(74,158,255,0.18);
+}
+
+.home-screen__resume-icon { font-size: var(--font-size-lg); color: var(--color-accent); }
+.home-screen__resume-text { font-size: var(--font-size-md); color: var(--color-text-primary); }
+.home-screen__resume-text strong { color: var(--color-accent); }
+.home-screen__resume-pos { color: rgba(255,255,255,0.5); font-size: var(--font-size-sm); margin-left: 4px; }
+
+/* ── Zone de contenu ─────────────────────────────────────────────────────── */
+
+.home-screen__content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.home-screen__loading {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-lg);
+}
+
+/* ── ContentGrid (conteneur hero + carrousel) ────────────────────────────── */
+
+.content-grid {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* overflow:hidden rognerait les transforms scale des cartes via le stacking context.
+     Le hero a son propre overflow:hidden et home-screen__content clôt le tout. */
+  overflow: visible;
+}
+
+.content-grid--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.content-grid__empty-msg {
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-relaxed);
+}
+
+/* ── Hero section ────────────────────────────────────────────────────────── */
+
+.content-hero {
+  flex: 1;
+  /* min-height suffisant pour afficher titre + méta + synopsis même avec le bandeau Reprendre */
+  min-height: 220px;
+  position: relative;
+  overflow: hidden;
+  background: #0a0a10;
+}
+
+.content-hero__backdrop {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center top;
+  transform: scale(1.08);
+  filter: brightness(0.55);
+  transition: background-image 300ms ease-out;
+}
+
+.content-hero__gradient {
+  position: absolute;
+  inset: 0;
+  /* Dégradé principal gauche→droite pour lisibilité du texte */
+  background: linear-gradient(
+    to right,
+    rgba(10, 10, 16, 0.98) 0%,
+    rgba(10, 10, 16, 0.90) 25%,
+    rgba(10, 10, 16, 0.70) 45%,
+    rgba(10, 10, 16, 0.50) 65%,
+    rgba(10, 10, 16, 0.25) 85%,
+    rgba(10, 10, 16, 0.08) 100%
+  );
+}
+
+.content-hero__gradient::after {
+  /* Fondu bas → carrousel */
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: linear-gradient(to bottom, transparent, #141414);
+}
+
+/* ── Hero : bandeau infos deux colonnes ──────────────────────────────────── */
+
+.content-hero__info {
+  /* Ancré en haut — le texte est visible dès que la zone hero est affichée */
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0;
+  padding: 28px 48px 0;
+  z-index: 1;
+}
+
+/* ── Colonne gauche 40% : titre, méta, réalisateur, acteurs ─────────────── */
+
+.content-hero__left {
+  width: 40%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 32px;
+}
+
+.content-hero__title {
+  font-size: 1.9rem;
+  font-weight: var(--font-weight-bold);
+  color: #fff;
+  line-height: 1.2;
+  margin: 0;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+  /* Pas de troncature : le titre doit être visible en entier */
+  overflow: visible;
+  white-space: normal;
+}
+
+.content-hero__meta {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+}
+
+.content-hero__meta > * + *::before {
+  content: '·';
+  margin: 0 8px;
+  color: rgba(255,255,255,0.30);
+}
+
+.content-hero__rating {
+  font-size: var(--font-size-sm);
+  color: #f1c40f;
+  font-weight: var(--font-weight-semibold);
+}
+
+.content-hero__year {
+  font-size: var(--font-size-sm);
+  color: rgba(255,255,255,0.65);
+}
+
+.content-hero__genre {
+  font-size: var(--font-size-sm);
+  color: rgba(255,255,255,0.65);
+}
+
+.content-hero__director,
+.content-hero__cast {
+  font-size: var(--font-size-xs);
+  color: rgba(255,255,255,0.55);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.content-hero__label {
+  color: rgba(255,255,255,0.35);
+  font-weight: var(--font-weight-medium);
+}
+
+/* ── Colonne droite 60% : synopsis ──────────────────────────────────────── */
+
+.content-hero__right {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.content-hero__plot {
+  font-size: var(--font-size-sm);
+  color: rgba(255,255,255,0.82);
+  line-height: 1.6;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 7;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Carrousel horizontal ─────────────────────────────────────────────────── */
+
+.content-carousel {
+  /* flex: 0 0 auto → hauteur exacte du contenu (header + track) */
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 0 0;
+  /* overflow: visible obligatoire : overflow-x:hidden force overflow-y:auto (spec CSS)
+     ce qui rognerait le scale(1.07) même avec padding suffisant */
+  overflow: visible;
+  background: #141414;
+}
+
+.content-carousel__header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+  padding: 0 48px;
+}
+
+/* Colonne gauche : label, prend l'espace restant */
+.content-carousel__label {
+  flex: 1;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Colonne droite : compteur, prend l'espace restant, texte aligné droite */
+.content-carousel__count {
+  flex: 1;
+  text-align: right;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* ── Boutons de tri — colonne centrale, centrés ──────────────────────────── */
+
+.content-sort {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 16px;
+}
+
+.content-sort__btn {
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: rgba(74, 158, 255, 0.65);
+  background: rgba(74, 158, 255, 0.05);
+  border: 1.5px solid rgba(74, 158, 255, 0.30);
+  border-radius: 20px;
+  padding: 4px 13px;
+  cursor: pointer;
+  outline: none;
+  transition: background 120ms, color 120ms, border-color 120ms;
+  white-space: nowrap;
+}
+
+.content-sort__btn--active {
+  color: #fff;
+  border-color: rgba(74, 158, 255, 0.90);
+  background: rgba(74, 158, 255, 0.22);
+  font-weight: var(--font-weight-semibold);
+}
+
+.content-sort__btn--focused,
+.content-sort__btn:focus {
+  outline: 2px solid rgba(74, 158, 255, 0.90);
+  outline-offset: 2px;
+  color: rgba(74, 158, 255, 0.90);
+}
+
+.content-carousel__track {
+  display: flex;
+  flex-direction: row;
+  /* D = Ls-L+E*2 = (288*1.07-288)+3*2 ≈ 26px */
+  gap: 26px;
+  overflow-x: auto;
+  /* overflow-y ne peut pas être visible si overflow-x est auto (spec CSS) :
+     on augmente le padding pour absorber le scale+cadre dans la zone de padding,
+     qui n'est PAS rognée par overflow:auto */
+  overflow-y: auto;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+  align-items: flex-start;
+  /* padding = ceil(H*(scale-1)/2) + E = ceil(432*0.07/2) + 3 = 16+3 = 19 → 20px */
+  padding: 20px 48px 20px;
+}
+
+.content-carousel__track::-webkit-scrollbar { display: none; }
+
+/* ── ContentCard — style TiviMate ─────────────────────────────────────────── */
+
+.content-card {
+  display: flex;
+  flex-direction: column;
+  background-color: transparent;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+  cursor: pointer;
+  transition: transform 150ms ease-out;
+  will-change: transform;
+  /* outline:none dans la règle de base + dans :focus pour webOS Chromium */
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+  width: 288px;
+}
+
+.content-card.focused,
+.content-card:focus {
+  outline: none;          /* supprime l'outline natif du navigateur webOS */
+  transform: scale(1.07);
+  z-index: var(--z-card);
+  position: relative;
+}
+
+/* Cadre bleu uniquement autour du poster (pas sur la zone titre/note) */
+.content-card.focused .content-card__poster-wrap,
+.content-card:focus .content-card__poster-wrap {
+  box-shadow:
+    0 0 0 3px rgba(74, 158, 255, 0.95),  /* anneau net E=3px */
+    0 0 24px rgba(74, 158, 255, 0.40);   /* halo uniforme sans décalage */
+}
+
+/* Wrapper poster */
+.content-card__poster-wrap {
+  position: relative;
+  flex-shrink: 0;
+  border-radius: 4px;
+  transition: box-shadow 150ms ease-out;
+}
+
+.content-card__fav-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 18px;
+  color: #f1c40f;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Poster ratio 2:3 */
+.poster-image {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background-color: #1a1a24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  border-radius: 4px;
+}
+
+.poster-image__fallback {
+  font-size: 48px;
+  opacity: 0.25;
+}
+
+/* Infos sous le poster */
+.content-card__info {
+  padding: 6px 2px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.content-card__title {
+  font-size: var(--font-size-xs);
+  color: #ccc;
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.content-card__rating {
+  font-size: 12px;
+  color: #f1c40f;
+}
+
+/* ── Barre de statut ─────────────────────────────────────────────────────── */
+
+.home-screen__statusbar {
+  background-color: #0e0e14;
+  border-top: 1px solid #1e1e2a;
+  display: flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+  min-height: var(--statusbar-height);
+}

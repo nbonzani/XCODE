@@ -1,0 +1,177 @@
+/**
+ * src/components/home/Sidebar.css
+ * Panneau latéral gauche — style TiviMate
+ */
+
+/* ── Conteneur ──────────────────────────────────────────────────────────── */
+
+.sidebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--sidebar-width);
+  height: 100%;
+  background-color: #0d0d14;
+  border-right: 1px solid #2a2a3a;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: var(--z-overlay);
+  transform: translateX(-100%);
+  transition: transform 200ms ease-out;
+  box-shadow: 4px 0 32px rgba(0, 0, 0, 0.8);
+}
+
+.sidebar--open {
+  transform: translateX(0);
+}
+
+/* ── Logo ────────────────────────────────────────────────────────────────── */
+
+.sidebar__logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 20px 18px;
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+}
+
+.sidebar__logo-icon {
+  font-size: 26px;
+}
+
+.sidebar__logo-text {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+  letter-spacing: 3px;
+}
+
+/* ── Onglets ─────────────────────────────────────────────────────────────── */
+
+.sidebar__tabs {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 0 6px;
+  flex-shrink: 0;
+}
+
+.sidebar__tab {
+  display: flex;
+  align-items: center;
+  padding: 13px 20px;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-left: 3px solid transparent;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.sidebar__tab--active {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+  border-left-color: var(--color-accent);
+  background-color: rgba(74, 158, 255, 0.10);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.sidebar__tab:focus {
+  outline: 2px solid rgba(74, 158, 255, 0.9);
+  outline-offset: -2px;
+  background-color: rgba(74, 158, 255, 0.10);
+  color: var(--color-text-primary);
+}
+
+/* ── Séparateur ─────────────────────────────────────────────────────────── */
+
+.sidebar__divider {
+  height: 1px;
+  background-color: var(--color-divider);
+  margin: 4px 14px;
+  flex-shrink: 0;
+}
+
+/* ── Liste des catégories ───────────────────────────────────────────────── */
+
+.sidebar__cats {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  padding: 6px 0;
+}
+
+.sidebar__cats::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar__cat-item {
+  display: block;
+  width: 100%;
+  padding: 9px 20px 9px 26px;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  outline: none;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.sidebar__cat-item--selected {
+  color: var(--color-accent);
+  border-left-color: var(--color-accent);
+  background-color: rgba(74, 158, 255, 0.10);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.sidebar__cat-item:focus {
+  outline: 2px solid rgba(74, 158, 255, 0.9);
+  outline-offset: -2px;
+  background-color: rgba(74, 158, 255, 0.12);
+  color: var(--color-text-primary);
+}
+
+/* ── Pied de page : Paramètres ──────────────────────────────────────────── */
+
+.sidebar__footer {
+  padding: 12px 14px;
+  border-top: 1px solid var(--color-divider);
+  flex-shrink: 0;
+}
+
+.sidebar__settings {
+  width: 100%;
+  padding: 10px 14px;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.sidebar__settings:focus {
+  outline: 2px solid rgba(74, 158, 255, 0.9);
+  outline-offset: 2px;
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+  background-color: rgba(74, 158, 255, 0.10);
+}

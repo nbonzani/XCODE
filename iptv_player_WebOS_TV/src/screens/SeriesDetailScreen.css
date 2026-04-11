@@ -1,0 +1,324 @@
+/**
+ * src/screens/SeriesDetailScreen.css
+ */
+
+/* ── Conteneur plein écran ───────────────────────────────────────────────── */
+
+.series-screen {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  background-color: var(--color-bg-primary);
+  overflow: hidden;
+}
+
+.series-screen--center {
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── Colonne gauche ──────────────────────────────────────────────────────── */
+
+.series-screen__left {
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-5) var(--space-4);
+  border-right: 1px solid var(--color-divider);
+  background-color: var(--color-bg-secondary);
+  gap: var(--space-5);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.series-screen__left::-webkit-scrollbar { display: none; }
+
+/* ── En-tête série ───────────────────────────────────────────────────────── */
+
+.series-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.series-header__info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.series-header__title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  line-height: var(--line-height-tight);
+}
+
+.series-header__meta {
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+}
+
+.series-header__plot {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Bouton retour ───────────────────────────────────────────────────────── */
+
+.series-screen__left-actions {
+  margin-top: auto;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.series-back-btn {
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-md);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.series-back-btn:focus,
+.series-back-btn:focus {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 3px;
+  transform: scale(1.03);
+}
+
+.series-fav-btn {
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-md);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.series-fav-btn--active {
+  color: #f1c40f;
+  border-color: #f1c40f;
+}
+
+.series-fav-btn:focus,
+.series-fav-btn:focus {
+  outline: 3px solid #f1c40f;
+  outline-offset: 3px;
+}
+
+/* ── Colonne droite ──────────────────────────────────────────────────────── */
+
+.series-screen__right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.series-screen__lists {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ── Titre de liste ──────────────────────────────────────────────────────── */
+
+.list-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+}
+
+/* ── Liste des saisons ───────────────────────────────────────────────────── */
+
+.season-list {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--color-divider);
+  overflow-y: auto;
+  scrollbar-width: none;
+  background-color: var(--color-bg-secondary);
+}
+
+.season-list::-webkit-scrollbar { display: none; }
+
+.season-list--focused {
+  border-right-color: var(--color-accent);
+}
+
+.season-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  outline: none;
+}
+
+.season-item--active {
+  background-color: var(--color-bg-tertiary);
+  border-left-color: var(--color-accent);
+}
+
+.season-item.focused {
+  background-color: var(--color-bg-tertiary);
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.season-item__icon { font-size: var(--font-size-md); flex-shrink: 0; }
+
+.season-item__label {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.season-item__count {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ── Liste des épisodes ──────────────────────────────────────────────────── */
+
+.episode-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.episode-list::-webkit-scrollbar { display: none; }
+
+.episode-list--empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+}
+
+.episode-list--focused .list-title {
+  color: var(--color-accent);
+}
+
+.episode-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  outline: none;
+  transition: background-color var(--transition-fast);
+}
+
+.episode-item--watched {
+  opacity: 0.7;
+}
+
+.episode-item.focused {
+  background-color: var(--color-bg-tertiary);
+  border-left-color: var(--color-accent);
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.episode-item__num {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.episode-item__title {
+  flex: 1;
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.episode-item__badge {
+  font-size: var(--font-size-sm);
+  flex-shrink: 0;
+}
+
+/* ── Barre d'actions ─────────────────────────────────────────────────────── */
+
+.series-action-bar {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-divider);
+  background-color: var(--color-bg-secondary);
+  flex-shrink: 0;
+}
+
+.series-action-bar__btn {
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-5);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.series-action-bar__btn:focus,
+.series-action-bar__btn:focus {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 3px;
+  transform: scale(1.03);
+}
+
+.series-action-bar__btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.series-action-bar__btn--episode {
+  background-color: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.series-action-bar__btn--season {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border: 2px solid var(--color-border);
+}
+
+.series-action-bar__btn--season:focus,
+.series-action-bar__btn--season:focus {
+  background-color: var(--color-accent-dark);
+  color: var(--color-text-inverse);
+  border-color: var(--color-accent);
+}

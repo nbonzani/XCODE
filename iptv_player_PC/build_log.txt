@@ -1,0 +1,118 @@
+Requirement already satisfied: pyinstaller in c:\users\bonzani1.pny-gm-nbo\appdata\local\programs\python\python312\lib\site-packages (6.19.0)
+Requirement already satisfied: altgraph in c:\users\bonzani1.pny-gm-nbo\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (0.17.5)
+Requirement already satisfied: packaging>=22.0 in c:\users\bonzani1.pny-gm-nbo\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (24.0)
+Requirement already satisfied: pefile>=2022.5.30 in c:\users\bonzani1.pny-gm-nbo\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (2024.8.26)
+Requirement already satisfied: pyinstaller-hooks-contrib>=2026.0 in c:\users\bonzani1.pny-gm-nbo\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (2026.3)
+Requirement already satisfied: pywin32-ctypes>=0.2.1 in c:\users\bonzani1.pny-gm-nbo\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (0.2.3)
+Requirement already satisfied: setuptools>=42.0.0 in c:\users\bonzani1.pny-gm-nbo\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (82.0.1)
+
+[notice] A new release of pip is available: 24.0 -> 26.0.1
+[notice] To update, run: python.exe -m pip install --upgrade pip
+278 INFO: PyInstaller: 6.19.0, contrib hooks: 2026.3
+279 INFO: Python: 3.12.3
+323 INFO: Platform: Windows-11-10.0.26200-SP0
+324 INFO: Python environment: C:\Users\bonzani1.PNY-GM-NBO\AppData\Local\Programs\Python\Python312
+328 INFO: Removing temporary files and cleaning cache in C:\Users\bonzani1.PNY-GM-NBO\AppData\Local\pyinstaller
+333 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\bonzani1.PNY-GM-NBO\\Documents\\CLAUDE\\CODE\\iptv_player_PC',
+ 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\python312.zip',
+ 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\DLLs',
+ 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib',
+ 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312',
+ 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages',
+ 'C:\\Users\\bonzani1.PNY-GM-NBO\\Documents\\CLAUDE\\CODE\\iptv_player_PC']
+1133 INFO: Appending 'binaries' from .spec
+1133 INFO: Appending 'datas' from .spec
+1143 INFO: checking Analysis
+1143 INFO: Building Analysis because Analysis-00.toc is non existent
+1143 INFO: Looking for Python shared library...
+1143 INFO: Using Python shared library: C:\Users\bonzani1.PNY-GM-NBO\AppData\Local\Programs\Python\Python312\python312.dll
+1143 INFO: Running Analysis Analysis-00.toc
+1143 INFO: Target bytecode optimization level: 0
+1143 INFO: Initializing module dependency graph...
+1146 INFO: Initializing module graph hook caches...
+1164 INFO: Analyzing modules for base_library.zip ...
+3916 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4010 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+5850 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+7404 INFO: Caching module dependency graph...
+7451 INFO: Analyzing C:\Users\bonzani1.PNY-GM-NBO\Documents\CLAUDE\CODE\iptv_player_PC\main.py
+7455 INFO: Processing standard module hook 'hook-PyQt6.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+8266 INFO: Processing standard module hook 'hook-PyQt6.QtWidgets.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+10488 INFO: Processing standard module hook 'hook-PyQt6.QtCore.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+14327 INFO: Processing standard module hook 'hook-PyQt6.QtGui.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+29114 INFO: Processing standard module hook 'hook-urllib3.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+29308 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+29311 INFO: SetuptoolsInfo: initializing cached setuptools info...
+30434 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+30441 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+30480 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+30483 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+30539 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+30549 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+30551 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+30561 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+30563 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+30691 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+30773 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+31001 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+31058 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+31061 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+31469 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+31473 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
+31493 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+31527 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+31529 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
+31778 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+31780 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+32222 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+32225 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+32941 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+33390 INFO: Processing standard module hook 'hook-certifi.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+33563 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+34742 INFO: Analyzing hidden import 'PyQt6.QtNetwork'
+34852 INFO: Processing standard module hook 'hook-PyQt6.QtNetwork.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+36877 INFO: Processing module hooks (post-graph stage)...
+37087 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+37627 INFO: Performing binary vs. data reclassification (503 entries)
+43730 INFO: Looking for ctypes DLLs
+43782 INFO: Analyzing run-time hooks ...
+43784 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+43788 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+43790 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+43792 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+43795 INFO: Including run-time hook 'pyi_rth_pyqt6.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+43797 INFO: Processing pre-find-module-path hook 'hook-_pyi_rth_utils.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+43803 INFO: Processing standard module hook 'hook-_pyi_rth_utils.py' from 'C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+43817 INFO: Creating base_library.zip...
+43852 INFO: Looking for dynamic libraries
+Could not find an up-to-date installation of `packaging`. License expressions might not be validated. To enforce validation, please install `packaging>=24.2`.
+45416 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyQt6\\Qt6\\bin']
+45416 INFO: Extra DLL search directories (PATH): ['C:\\Users\\bonzani1.PNY-GM-NBO\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyQt6\\Qt6\\bin']
+50986 INFO: Warnings written to C:\Users\bonzani1.PNY-GM-NBO\Documents\CLAUDE\CODE\iptv_player_PC\build\IPTV_Player\warn-IPTV_Player.txt
+51028 INFO: Graph cross-reference written to C:\Users\bonzani1.PNY-GM-NBO\Documents\CLAUDE\CODE\iptv_player_PC\build\IPTV_Player\xref-IPTV_Player.html
+51121 INFO: checking PYZ
+51121 INFO: Building PYZ because PYZ-00.toc is non existent
+51121 INFO: Building PYZ (ZlibArchive) C:\Users\bonzani1.PNY-GM-NBO\Documents\CLAUDE\CODE\iptv_player_PC\build\IPTV_Player\PYZ-00.pyz
+51493 INFO: Building PYZ (ZlibArchive) C:\Users\bonzani1.PNY-GM-NBO\Documents\CLAUDE\CODE\iptv_player_PC\build\IPTV_Player\PYZ-00.pyz completed successfully.
+51558 INFO: checking PKG
+51558 INFO: Building PKG because PKG-00.toc is non existent
+51558 INFO: Building PKG (CArchive) IPTV_Player.pkg
+51594 INFO: Building PKG (CArchive) IPTV_Player.pkg completed successfully.
+51602 INFO: Bootloader C:\Users\bonzani1.PNY-GM-NBO\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+51602 INFO: checking EXE
+51602 INFO: Building EXE because EXE-00.toc is non existent
+51602 INFO: Building EXE from EXE-00.toc
+51602 INFO: Copying bootloader EXE to C:\Users\bonzani1.PNY-GM-NBO\Documents\CLAUDE\CODE\iptv_player_PC\build\IPTV_Player\IPTV_Player.exe
+51685 INFO: Copying icon to EXE
+51730 INFO: Copying 0 resources to EXE
+51730 INFO: Embedding manifest in EXE
+51779 INFO: Appending PKG archive to EXE
+51841 INFO: Fixing EXE headers
+52020 INFO: Building EXE from EXE-00.toc completed successfully.
+52052 INFO: checking COLLECT
+52052 INFO: Building COLLECT because COLLECT-00.toc is non existent
+52052 INFO: Building COLLECT COLLECT-00.toc
+64890 INFO: Building COLLECT COLLECT-00.toc completed successfully.
+64916 INFO: Build complete! The results are available in: C:\Users\bonzani1.PNY-GM-NBO\Documents\CLAUDE\CODE\iptv_player_PC\dist
+VLC trouve : C:\Program Files\VideoLAN\VLC

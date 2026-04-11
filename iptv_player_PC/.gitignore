@@ -1,0 +1,32 @@
+# Fichiers Python compilés
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Sauvegardes ZIP
+backup_*.zip
+
+# Cache de l'application (miniatures, base SQLite)
+cache/
+*.db
+*.db-shm
+*.db-wal
+
+# Téléchargements (films, séries)
+downloads/
+
+# Environnements virtuels Python
+venv/
+.venv/
+env/
+
+# Fichiers système Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Fichiers IDE / éditeurs
+.vscode/
+.idea/
+*.swp
+*.swo

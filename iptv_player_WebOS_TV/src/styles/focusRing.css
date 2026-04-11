@@ -1,0 +1,281 @@
+/**
+ * src/styles/focusRing.css
+ * Styles du focus télécommande.
+ *
+ * Problème central des interfaces TV :
+ *   L'utilisateur navigue uniquement avec les flèches de la télécommande.
+ *   L'élément "actif" (focusé) doit être CLAIREMENT visible à 2–3 mètres
+ *   de distance sur un écran de 77 pouces.
+ *
+ * Règles de conception :
+ *   - Le focus ring doit être GRAS et COLORÉ (jamais subtil)
+ *   - Utiliser transform: scale() pour agrandir l'élément focusé (pas width/height)
+ *   - Utiliser uniquement transform et opacity pour les transitions (GPU-accélérées)
+ *   - Éviter box-shadow complexe (coûteux sur GPU TV)
+ *   - Durée de transition courte (120ms) pour une réactivité immédiate
+ *
+ * Stratégie CSS :
+ *   Tout élément avec tabIndex={0} ou [tabindex] reçoit automatiquement
+ *   ces styles au focus. Les composants peuvent surcharger avec leur propre
+ *   classe .focused (pour les cas où le focus CSS natif est insuffisant,
+ *   notamment pour les éléments imbriqués dans des grilles).
+ */
+
+/* =============================================================================
+   1. RESET DU FOCUS NATIF DU NAVIGATEUR
+   On supprime l'outline par défaut du navigateur (bleu webkit)
+   et on le remplace par notre propre design.
+   ============================================================================= */
+
+/* Supprime l'outline natif sur TOUS les éléments focusables */
+*:focus {
+  outline: none;
+}
+
+/* =============================================================================
+   2. FOCUS RING — STYLE PRINCIPAL
+   S'applique à tout élément focusable via tabIndex={0} ou [tabindex].
+   ============================================================================= */
+
+*:focus,
+[tabindex]:focus {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+
+  /* Transition sur outline-color uniquement (pas le layout) */
+  transition:
+    outline-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+/* =============================================================================
+   3. CLASSES DE FOCUS GÉRÉES PAR JAVASCRIPT
+   Utilisées lorsque le focus CSS natif (:focus) n'est pas suffisant.
+   Exemple : dans ContentGrid, on gère manuellement quel index est focusé,
+   car les éléments peuvent être rerenderisés lors du lazy loading.
+   ============================================================================= */
+
+/**
+ * .focused — classe appliquée dynamiquement par les composants React
+ * lorsqu'un élément est sélectionné via la logique de navigation JS.
+ *
+ * Effet visuel : agrandissement léger + anneau lumineux coloré.
+ * Le scale(1.05) est appliqué via transform — GPU-accéléré, pas de reflow.
+ */
+.focused {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 3px;
+  transform: scale(1.05);
+  z-index: var(--z-card);
+
+  transition:
+    outline-color var(--transition-fast),
+    transform var(--transition-fast),
+    opacity var(--transition-fast);
+
+  /* Améliore la lisibilité de l'élément focusé en assombrissant les voisins */
+  position: relative;
+}
+
+/* =============================================================================
+   4. STYLES FOCUS SPÉCIALISÉS PAR TYPE DE COMPOSANT
+   Chaque type de composant peut avoir son propre comportement visuel au focus.
+   ============================================================================= */
+
+/* --- ContentCard (Films / Séries) ----------------------------------------- */
+/**
+ * Les cartes de la grille ont un effet d'agrandissement plus prononcé
+ * et une élévation (box-shadow) pour se démarquer visuellement.
+ * La carte passe au-dessus des cartes voisines via z-index.
+ */
+.content-card.focused,
+.content-card:focus {
+  transform: scale(1.08);
+  outline: 3px solid var(--color-accent);
+  outline-offset: 4px;
+  border-radius: var(--card-border-radius);
+  box-shadow: 0 8px 32px rgba(74, 158, 255, 0.4);
+  z-index: var(--z-card);
+
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    outline-color var(--transition-fast);
+}
+
+/* --- ActionButton (boutons d'action génériques) ---------------------------- */
+/**
+ * Les boutons ont un fond coloré au focus (pas seulement un anneau).
+ * Lisibilité maximale sur fond sombre à distance.
+ */
+.action-button.focused,
+.action-button:focus {
+  background-color: var(--color-accent);
+  color: var(--color-text-inverse);
+  outline: 3px solid var(--color-accent-hover);
+  outline-offset: 2px;
+  transform: scale(1.03);
+
+  transition:
+    background-color var(--transition-fast),
+    transform var(--transition-fast),
+    outline-color var(--transition-fast);
+}
+
+/* --- EpisodeItem (liste d'épisodes dans SeriesDetailScreen) ---------------- */
+.episode-item.focused,
+.episode-item:focus {
+  background-color: var(--color-bg-tertiary);
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+
+  transition:
+    background-color var(--transition-fast),
+    outline-color var(--transition-fast);
+}
+
+/* --- SeasonItem (liste des saisons) --------------------------------------- */
+.season-item.focused,
+.season-item:focus {
+  background-color: var(--color-bg-tertiary);
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+
+  transition:
+    background-color var(--transition-fast),
+    outline-color var(--transition-fast);
+}
+
+/* --- FocusableInput (champ de saisie) ------------------------------------- */
+/**
+ * Les champs de saisie changent de bordure couleur au focus.
+ * L'outline standard est désactivé — on utilise border à la place
+ * pour éviter le double contour.
+ */
+.focusable-input.focused,
+.focusable-input:focus,
+input:focus {
+  outline: none;
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.3);
+
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+/* --- ToggleSwitch ---------------------------------------------------------- */
+.toggle-switch.focused,
+.toggle-switch:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+  border-radius: var(--radius-full);
+
+  transition: outline-color var(--transition-fast);
+}
+
+/* --- CategorySelector (liste déroulante) ---------------------------------- */
+.category-selector.focused,
+.category-selector:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-color: var(--color-accent);
+  border-radius: var(--radius-sm);
+
+  transition:
+    border-color var(--transition-fast),
+    outline-color var(--transition-fast);
+}
+
+/* --- TabBar (onglets Films / Séries) --------------------------------------- */
+.tab-item.focused,
+.tab-item:focus {
+  outline: none;
+  border-bottom: 3px solid var(--color-accent);
+  color: var(--color-accent);
+
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+/* État actif (onglet sélectionné, indépendamment du focus) */
+.tab-item.active {
+  border-bottom: 3px solid var(--color-accent);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* --- PlayerControls (boutons du lecteur vidéo) ---------------------------- */
+/**
+ * Dans le lecteur, le focus ring est plus discret :
+ * fond blanc semi-transparent plutôt qu'un anneau coloré.
+ * Raison : le lecteur est sur fond vidéo (contenu variable).
+ */
+.player-button.focused,
+.player-button:focus {
+  background-color: rgba(255, 255, 255, 0.2);
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+  transform: scale(1.1);
+
+  transition:
+    background-color var(--transition-fast),
+    transform var(--transition-fast),
+    outline-color var(--transition-fast);
+}
+
+/* ProgressBar focusée dans le lecteur */
+.progress-bar.focused,
+.progress-bar:focus {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 4px;
+  border-radius: var(--radius-full);
+
+  transition: outline-color var(--transition-fast);
+}
+
+/* =============================================================================
+   5. FOCUS TRAP — MODALES
+   Quand une modale est ouverte (MovieDetailModal), tous les éléments
+   hors de la modale doivent être visuellement "désactivés".
+   Le focus trap JS gère la logique — ce CSS gère l'apparence.
+   ============================================================================= */
+
+/**
+ * Classe appliquée au body ou au conteneur principal quand une modale est ouverte.
+ * Réduit l'opacité de l'arrière-plan pour signifier visuellement l'inactivité.
+ */
+.modal-open > *:not(.modal-container) {
+  opacity: 0.5;
+  pointer-events: none;
+
+  transition: opacity var(--transition-normal);
+}
+
+/* La modale elle-même reste à pleine opacité */
+.modal-container {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* =============================================================================
+   6. ANIMATION DE PULSATION POUR LE FOCUS INITIAL
+   Au premier affichage d'un écran, l'élément focusé par défaut pulse
+   une fois pour attirer l'attention de l'utilisateur.
+   ============================================================================= */
+
+@keyframes focusPulse {
+  0%   { outline-color: var(--color-accent); outline-width: 3px; }
+  50%  { outline-color: var(--color-accent-hover); outline-width: 5px; }
+  100% { outline-color: var(--color-accent); outline-width: 3px; }
+}
+
+.focused-initial {
+  animation: focusPulse 600ms ease-in-out 1;
+}
