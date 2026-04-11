@@ -14,6 +14,7 @@ COLUMNS = [
     ("Groupe",    "group",        250),
     ("Type",      "content_type", 80),
     ("Qualité",   "quality",      80),
+    ("Année",     "year",         60),
     ("Score",     "rating",       70),
     ("URL",       "url",          400),
 ]
@@ -98,14 +99,12 @@ class ChannelTable(QTableWidget):
             color = self._color_for_type(entry.get("content_type", ""))
             brush = QBrush(color)
 
-            values = [
-                entry.get("name", ""),
-                entry.get("group", ""),
-                entry.get("content_type", ""),
-                entry.get("quality", ""),
-                self._format_rating(entry.get("rating", "")),
-                entry.get("url", ""),
-            ]
+            values = []
+            for _, key, _ in COLUMNS:
+                if key == "rating":
+                    values.append(self._format_rating(entry.get("rating", "")))
+                else:
+                    values.append(entry.get(key, ""))
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setBackground(brush)

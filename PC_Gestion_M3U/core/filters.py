@@ -60,7 +60,7 @@ def apply_filters(entries: list, filter_config: dict) -> list:
                           Si vide ou absent, retourne liste vide.
       - "qualities"     : set de str parmi {"4K","FHD","HD","SD","unknown"}
                           Si vide ou absent, pas de filtre qualité.
-      - "group"         : str — filtre exact sur group-title (vide = pas de filtre)
+      - "groups"        : set de str — catégories cochées (vide = toutes)
       - "lang_keywords" : list de str — mots-clés à chercher dans le group-title
                           pour filtrer par langue (ex: ["FR", "FRENCH", "FRANCE"])
       - "search_text"   : str — texte libre cherché dans le nom
@@ -71,7 +71,7 @@ def apply_filters(entries: list, filter_config: dict) -> list:
 
     results = []
     qualities = filter_config.get("qualities", set())
-    group_filter = filter_config.get("group", "").strip().lower()
+    groups_filter = filter_config.get("groups", set())
     lang_keywords = filter_config.get("lang_keywords", [])
     search_text = filter_config.get("search_text", "").strip().lower()
 
@@ -84,8 +84,8 @@ def apply_filters(entries: list, filter_config: dict) -> list:
         if qualities and entry["quality"] not in qualities:
             continue
 
-        # Filtre catégorie (correspondance exacte)
-        if group_filter and group_filter != entry["group"].lower():
+        # Filtre catégories (multi-sélection)
+        if groups_filter and entry["group"] not in groups_filter:
             continue
 
         # Filtre langue (texte original du groupe)
@@ -98,6 +98,34 @@ def apply_filters(entries: list, filter_config: dict) -> list:
         if search_text and search_text not in entry["name"].lower():
             continue
 
+        results.append(entry)
+
+    return results
+
+
+def apply_filters_no_groups(entries: list, filter_config: dict) -> list:
+    """Applique tous les filtres SAUF le filtre catégorie.
+    Utile pour déterminer les catégories disponibles."""
+    content_types = filter_config.get("content_types", set())
+    if not content_types:
+        return []
+
+    results = []
+    qualities = filter_config.get("qualities", set())
+    lang_keywords = filter_config.get("lang_keywords", [])
+    search_text = filter_config.get("search_text", "").strip().lower()
+
+    for entry in entries:
+        if entry["content_type"] not in content_types:
+            continue
+        if qualities and entry["quality"] not in qualities:
+            continue
+        if lang_keywords:
+            group_orig = entry["group"]
+            if not any(_lang_keyword_matches(group_orig, kw) for kw in lang_keywords):
+                continue
+        if search_text and search_text not in entry["name"].lower():
+            continue
         results.append(entry)
 
     return results

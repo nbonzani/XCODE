@@ -1,0 +1,23 @@
+# VoiceNotes - Dependances Python
+# Installation : pip install -r requirements.txt
+# Python requis : 3.10 ou superieur
+
+# Interface graphique
+PyQt6>=6.6.0
+
+# Enregistrement audio (PortAudio - pas besoin de compiler sur Windows)
+sounddevice>=0.4.6
+
+# Traitement audio
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Transcription locale Whisper
+# IMPORTANT : ffmpeg doit etre installe separement (voir README.md)
+openai-whisper>=20231117
+
+# Classification par IA (API Anthropic - optionnel)
+anthropic>=0.40.0
+
+# Chargement du fichier .env
+python-dotenv>=1.0.0

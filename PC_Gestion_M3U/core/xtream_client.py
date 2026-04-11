@@ -60,8 +60,12 @@ class XtreamClient:
         else:
             raise ValueError("Identifiants incorrects")
 
-    def download_m3u(self) -> str:
+    def download_m3u(self, progress_callback=None) -> str:
         """Télécharge la playlist M3U complète.
+
+        Args:
+            progress_callback: optionnel, callable(bytes_received, bytes_total)
+                appelé à chaque bloc téléchargé. bytes_total vaut 0 si inconnu.
 
         Returns:
             Le contenu texte brut de la playlist M3U.
@@ -84,16 +88,23 @@ class XtreamClient:
             )
             response.raise_for_status()
 
+            # Taille totale (peut être absente ou 0)
+            total = int(response.headers.get("Content-Length", 0))
+
             # Lecture brute par blocs via urllib3 (contourne IncompleteRead)
             # decode_content=True gère le gzip/deflate éventuel
             raw = response.raw
             raw.decode_content = True
             chunks = []
+            received = 0
             while True:
                 chunk = raw.read(1024 * 256)
                 if not chunk:
                     break
                 chunks.append(chunk)
+                received += len(chunk)
+                if progress_callback:
+                    progress_callback(received, total)
             data = b"".join(chunks)
             return data.decode("utf-8", errors="replace")
         except requests.exceptions.Timeout as e:

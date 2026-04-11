@@ -1,6 +1,15 @@
 import re
 
 # Mots-clés pour détecter la qualité dans le nom ou le groupe
+_YEAR_RE = re.compile(r'\b(1[89]\d{2}|20\d{2}|2100)\b')
+
+
+def detect_year(name: str) -> str:
+    """Extrait l'année (1900-2100) la plus à droite dans le nom. Retourne "" si aucune."""
+    matches = _YEAR_RE.findall(name)
+    return matches[-1] if matches else ""
+
+
 QUALITY_KEYWORDS = {
     "4K": ["4K", "4k", "UHD", "uhd", "2160"],
     "FHD": ["FHD", "fhd", "1080", "FULLHD", "FullHD", "Full HD"],
@@ -70,6 +79,7 @@ def parse_m3u(text: str) -> list:
                 "group":        attrs.get("group-title", ""),
                 "tvg_chno":     attrs.get("tvg-chno", ""),
                 "rating":       attrs.get("rating", ""),
+                "year":         detect_year(display_name),
                 "raw_extinf":   line,
                 "url":          "",
                 "content_type": "",

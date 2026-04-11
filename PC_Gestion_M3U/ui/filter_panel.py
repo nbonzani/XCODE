@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QCheckBox, QPushButton, QLabel, QLineEdit,
-    QComboBox, QScrollArea, QSizePolicy
+    QScrollArea, QSizePolicy, QGridLayout
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 
@@ -23,7 +23,8 @@ class FilterPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(300)
+        self.setMinimumWidth(340)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self._all_groups = []
 
         scroll = QScrollArea()
@@ -90,14 +91,38 @@ class FilterPanel(QWidget):
         vbox_qual.addLayout(hbox_qual_btns)
         layout.addWidget(grp_qual)
 
-        # --- Section catégorie ---
-        grp_group = QGroupBox("Categorie")
+        # --- Section catégorie (cases à cocher sur 2 colonnes) ---
+        grp_group = QGroupBox("Categories")
         vbox_group = QVBoxLayout(grp_group)
-        self.combo_group = QComboBox()
-        self.combo_group.addItem("-- Toutes --", "")
-        self.combo_group.setEditable(True)
-        self.combo_group.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        vbox_group.addWidget(self.combo_group)
+
+        # Recherche rapide dans les catégories
+        self._edit_group_search = QLineEdit()
+        self._edit_group_search.setPlaceholderText("Filtrer les categories…")
+        self._edit_group_search.textChanged.connect(self._filter_group_checkboxes)
+        vbox_group.addWidget(self._edit_group_search)
+
+        # Grille 2 colonnes pour les cases à cocher (pas de scroll)
+        self._group_grid_widget = QWidget()
+        self._group_grid = QGridLayout(self._group_grid_widget)
+        self._group_grid.setSpacing(1)
+        self._group_grid.setContentsMargins(2, 2, 2, 2)
+        self._group_grid.setColumnStretch(0, 1)
+        self._group_grid.setColumnStretch(1, 1)
+        vbox_group.addWidget(self._group_grid_widget)
+
+        self._group_checkboxes = {}  # group_name → QCheckBox
+
+        hbox_grp_btns = QHBoxLayout()
+        btn_grp_all = QPushButton("Tout")
+        btn_grp_none = QPushButton("Rien")
+        btn_grp_all.setFixedHeight(24)
+        btn_grp_none.setFixedHeight(24)
+        btn_grp_all.clicked.connect(self._check_all_groups)
+        btn_grp_none.clicked.connect(self._uncheck_all_groups)
+        hbox_grp_btns.addWidget(btn_grp_all)
+        hbox_grp_btns.addWidget(btn_grp_none)
+        vbox_group.addLayout(hbox_grp_btns)
+
         layout.addWidget(grp_group)
 
         # --- Section langue (européennes, construite dynamiquement) ---
@@ -149,28 +174,46 @@ class FilterPanel(QWidget):
         outer.addWidget(scroll)
 
     def set_groups(self, groups: list):
-        """Alimente la liste déroulante des catégories."""
+        """Mémorise les catégories initiales (chargement brut)."""
         self._all_groups = groups
-        self.combo_group.blockSignals(True)
-        self.combo_group.clear()
-        self.combo_group.addItem("-- Toutes --", "")
-        for g in groups:
-            self.combo_group.addItem(g, g)
-        self.combo_group.blockSignals(False)
 
     def update_groups_from_filtered(self, filtered_entries: list):
-        """Met à jour les catégories avec celles présentes dans la liste filtrée."""
+        """Reconstruit les cases catégorie à partir de la liste filtrée actuelle."""
         groups = sorted(set(e["group"] for e in filtered_entries if e["group"]))
-        self.combo_group.blockSignals(True)
-        current = self.combo_group.currentData()
-        self.combo_group.clear()
-        self.combo_group.addItem("-- Toutes --", "")
-        for g in groups:
-            self.combo_group.addItem(g, g)
-        idx = self.combo_group.findData(current)
-        if idx >= 0:
-            self.combo_group.setCurrentIndex(idx)
-        self.combo_group.blockSignals(False)
+        # Conserver l'état des cases déjà cochées
+        previously_checked = {
+            name for name, cb in self._group_checkboxes.items() if cb.isChecked()
+        }
+        # Supprimer les anciennes cases
+        for cb in self._group_checkboxes.values():
+            self._group_grid.removeWidget(cb)
+            cb.deleteLater()
+        self._group_checkboxes.clear()
+        # Créer les nouvelles cases sur 2 colonnes
+        for i, g in enumerate(groups):
+            cb = QCheckBox(g)
+            cb.setChecked(g in previously_checked if previously_checked else True)
+            cb.setStyleSheet("QCheckBox { font-size: 9px; }")
+            cb.setToolTip(g)
+            self._group_grid.addWidget(cb, i // 2, i % 2)
+            self._group_checkboxes[g] = cb
+        self._edit_group_search.clear()
+
+    def _check_all_groups(self):
+        for cb in self._group_checkboxes.values():
+            if not cb.isHidden():
+                cb.setChecked(True)
+
+    def _uncheck_all_groups(self):
+        for cb in self._group_checkboxes.values():
+            if not cb.isHidden():
+                cb.setChecked(False)
+
+    def _filter_group_checkboxes(self, text: str):
+        """Filtre l'affichage des cases catégorie selon le texte saisi."""
+        text_lower = text.strip().lower()
+        for name, cb in self._group_checkboxes.items():
+            cb.setVisible(not text_lower or text_lower in name.lower())
 
     def set_lang_codes(self, detected_codes: list):
         """Construit les cases langue : seulement les langues européennes
@@ -180,13 +223,13 @@ class FilterPanel(QWidget):
             cb.deleteLater()
         self._lang_checkboxes.clear()
 
-        # Ne garder que les codes européens détectés
+        # Ne garder que les codes européens détectés — FR coché par défaut
         for code in sorted(EUROPEAN_LANGUAGES.keys()):
             if code not in detected_codes:
                 continue
             label_name, _ = EUROPEAN_LANGUAGES[code]
             cb = QCheckBox(f"{code} - {label_name}")
-            cb.setChecked(True)
+            cb.setChecked(code == "FR")
             if code == "FR":
                 cb.setStyleSheet(
                     "QCheckBox { font-weight: bold; font-size: 13px; }"
@@ -207,9 +250,17 @@ class FilterPanel(QWidget):
         if self.cb_sd.isChecked():      qualities.add("SD")
         if self.cb_unknown.isChecked(): qualities.add("unknown")
 
-        group_val = self.combo_group.currentData()
-        if group_val is None:
-            group_val = ""
+        # Catégories cochées (set vide = toutes)
+        checked_groups = set()
+        all_checked = True
+        for name, cb in self._group_checkboxes.items():
+            if cb.isChecked():
+                checked_groups.add(name)
+            else:
+                all_checked = False
+        # Si toutes cochées, pas de filtre catégorie
+        if all_checked:
+            checked_groups = set()
 
         # Mots-clés langue cochés (synonymes européens)
         lang_keywords = []
@@ -221,7 +272,7 @@ class FilterPanel(QWidget):
         return {
             "content_types": content_types,
             "qualities":     qualities,
-            "group":         group_val,
+            "groups":        checked_groups,
             "lang_keywords": lang_keywords,
             "search_text":   self.edit_search.text(),
         }
