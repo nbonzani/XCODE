@@ -1,0 +1,563 @@
+AIDA64 for Android v2.19 Report
+
+<<< Système >>>
+
+Fabricant: Amlogic
+Modéle: X9T
+Marque: Amlogic
+Carte Mère: q201
+Appareil: q201
+Matériel: amlogic
+Plateforme: gxm
+Produit: q201
+Num Série: 170712027
+RAM Installée: 2 Go
+Mémoire Totale: 1822 Mo
+Mémoire Disponible: 841 Mo
+Total Espace Stockage Interne: 11,50 Go
+Espace Stockage Interne Libre: 10209 Mo
+Version Bluetooth: 4+
+Fonctionnalités: android.hardware.audio.low_latency
+android.hardware.audio.output
+android.hardware.bluetooth
+android.hardware.bluetooth_le
+android.hardware.camera
+android.hardware.camera.any
+android.hardware.camera.autofocus
+android.hardware.camera.flash
+android.hardware.camera.front
+android.hardware.ethernet
+android.hardware.faketouch
+android.hardware.faketouch.multitouch
+android.hardware.faketouch.multitouch.distinct
+android.hardware.faketouch.multitouch.jazzhand
+android.hardware.hdmi.cec
+android.hardware.location
+android.hardware.location.gps
+android.hardware.location.network
+android.hardware.microphone
+android.hardware.screen.landscape
+android.hardware.screen.portrait
+android.hardware.sensor.accelerometer
+android.hardware.sensor.barometer
+android.hardware.sensor.compass
+android.hardware.sensor.gyroscope
+android.hardware.sensor.light
+android.hardware.sensor.proximity
+android.hardware.telephony
+android.hardware.telephony.cdma
+android.hardware.telephony.gsm
+android.hardware.touchscreen
+android.hardware.touchscreen.multitouch
+android.hardware.touchscreen.multitouch.distinct
+android.hardware.touchscreen.multitouch.jazzhand
+android.hardware.usb.accessory
+android.hardware.usb.host
+android.hardware.wifi
+android.hardware.wifi.direct
+android.software.app_widgets
+android.software.backup
+android.software.device_admin
+android.software.home_screen
+android.software.input_methods
+android.software.live_wallpaper
+android.software.print
+android.software.sip
+android.software.sip.voip
+android.software.webview
+com.google.android.feature.EXCHANGE_6_2
+com.google.android.feature.GOOGLE_BUILD
+com.google.android.feature.GOOGLE_EXPERIENCE
+com.nxp.mifare
+
+<<< CPU >>>
+
+Core Architecture: 8x ARM Cortex-A53 @ 1000 MHz
+Jeu d'instructions: 64-bits ARMv8-A (Mode 32-bit)
+CPU Revision: r0p4
+Coeurs CPU: 8
+Fréquence CPU: 100 - 1512 MHz
+Core 1 Fréquence: 1512 MHz
+Core 2 Fréquence: 1512 MHz
+Core 3 Fréquence: 1512 MHz
+Core 4 Fréquence: 1512 MHz
+Core 5 Fréquence: 1000 MHz
+Core 6 Fréquence: 1000 MHz
+Core 7 Fréquence: 1000 MHz
+Core 8 Fréquence: 1000 MHz
+Utilisation CPU: 14 %
+Gestion Intelligente de La fréquence: interactive
+ABIs Supportés: armeabi-v7a, armeabi
+32-bit ABIs Supportés: armeabi-v7a, armeabi
+AES: Supporté
+ASIMD/NEON: Supporté
+PMULL: Supporté
+SHA1: Supporté
+SHA2: Supporté
+
+<<< Affichage >>>
+
+Résolution Ecran: 1920 × 1080
+xdpi / ydpi: 160 / 160 dpi
+Fournisseur GPU: ARM
+GPU Renderer: Mali-T820
+Coeurs GPU: 3
+Taux de Rafraîchissement: 60 Hz
+Orientation par Défaut: Paysage
+Version OpenGL ES: 3.2
+Version GPU: OpenGL ES 3.2 v1.r11p0-00rel0.f83e33152085d4fe9267c1d35c6f9fca
+Extensions OpenGL ES: GL_EXT_debug_marker
+GL_ARM_rgba8
+GL_ARM_mali_shader_binary
+GL_OES_depth24
+GL_OES_depth_texture
+GL_OES_depth_texture_cube_map
+GL_OES_packed_depth_stencil
+GL_OES_rgb8_rgba8
+GL_EXT_read_format_bgra
+GL_OES_compressed_paletted_texture
+GL_OES_compressed_ETC1_RGB8_texture
+GL_OES_standard_derivatives
+GL_OES_EGL_image
+GL_OES_EGL_image_external
+GL_OES_EGL_image_external_essl3
+GL_OES_EGL_sync
+GL_OES_texture_npot
+GL_OES_vertex_half_float
+GL_OES_required_internalformat
+GL_OES_vertex_array_object
+GL_OES_mapbuffer
+GL_EXT_texture_format_BGRA8888
+GL_EXT_texture_rg
+GL_EXT_texture_type_2_10_10_10_REV
+GL_OES_fbo_render_mipmap
+GL_OES_element_index_uint
+GL_EXT_shadow_samplers
+GL_OES_texture_compression_astc
+GL_KHR_texture_compression_astc_ldr
+GL_KHR_texture_compression_astc_hdr
+GL_KHR_texture_compression_astc_sliced_3d
+GL_KHR_debug
+GL_EXT_occlusion_query_boolean
+GL_EXT_disjoint_timer_query
+GL_EXT_blend_minmax
+GL_EXT_discard_framebuffer
+GL_OES_get_program_binary
+GL_OES_texture_3D
+GL_EXT_texture_storage
+GL_EXT_multisampled_render_to_texture
+GL_OES_surfaceless_context
+GL_OES_texture_stencil8
+GL_EXT_shader_pixel_local_storage
+GL_ARM_shader_framebuffer_fetch
+GL_ARM_shader_framebuffer_fetch_depth_stencil
+GL_ARM_mali_program_binary
+GL_EXT_sRGB
+GL_EXT_sRGB_write_control
+GL_EXT_texture_sRGB_decode
+GL_KHR_blend_equation_advanced
+GL_KHR_blend_equation_advanced_coherent
+GL_OES_texture_storage_multisample_2d_array
+GL_OES_shader_image_atomic
+GL_EXT_robustness
+GL_EXT_draw_buffers_indexed
+GL_OES_draw_buffers_indexed
+GL_EXT_texture_border_clamp
+GL_OES_texture_border_clamp
+GL_EXT_texture_cube_map_array
+GL_OES_texture_cube_map_array
+GL_OES_sample_variables
+GL_OES_sample_shading
+GL_OES_shader_multisample_interpolation
+GL_EXT_shader_io_blocks
+GL_OES_shader_io_blocks
+GL_EXT_tessellation_shader
+GL_OES_tessellation_shader
+GL_EXT_primitive_bounding_box
+GL_OES_primitive_bounding_box
+GL_EXT_geometry_shader
+GL_OES_geometry_shader
+GL_ANDROID_extension_pack_es31a
+GL_EXT_gpu_shader5
+GL_OES_gpu_shader5
+GL_EXT_texture_buffer
+GL_OES_texture_buffer
+GL_EXT_copy_image
+GL_OES_copy_image
+GL_EXT_color_buffer_half_float
+GL_EXT_color_buffer_float
+GL_OVR_multiview
+GL_OVR_multiview2
+GL_OVR_multiview_multisampled_render_to_texture
+GL_ARM_packed_arithmetic
+GL_KHR_robustness
+GL_KHR_robust_buffer_access_behavior
+GL_EXT_draw_elements_base_vertex
+
+<<< Réseau >>>
+
+<< Telephonie >>
+Type Téléphone: Aucun
+
+<< Wi-Fi >>
+Etat: Activé
+SSID: "Galaxy S25"
+BSSID: 46:7e:f5:0a:0f:db
+SSID Masqué: Non
+Addresse IPv4: 10.108.102.217
+Addresse IPv6: fe80::ceb8:a8ff:fe2d:ea96
+Force du Signal: -21 dBm (Excellent)
+Vitesse: 72 Mb/s
+Frequence: 2412 MHz
+ID Réseau: 1
+Passerelle: 10.108.102.187
+Masque de Sous-Reseau: 255.255.255.0
+DNS1: 10.108.102.187
+Durée Bail DHCP: 3599 sec
+Bande 5 GHz: Non Supporté
+Wi-Fi Aware: Non Supporté
+Wi-Fi Direct: Supporté
+
+<<< Batterie >>>
+
+Source Alimentation: Chargeur Secteur
+Niveau: 100 %
+Statut: En Chargement
+Santé: Bon
+Température: 42,4°C
+
+<<< Android >>>
+
+Version Android: 6.0.1 (Marshmallow)
+Niveau API: 23
+Niveau du correctif de sécurité Android: 2016-08-01
+Appareil rooté: Oui
+ID Android: bc722e20bb00b1e9
+ID de Build: q201-userdebug 6.0.1 MHC19J 20170527 test-keys
+nom de Code: REL
+Empreinte Digitale: Amlogic/q201/q201:6.0.1/MHC19J/20170527:userdebug/test-keys
+ID: MHC19J
+Incremental: 20170527
+Version Java Runtime: Android Runtime 0.9
+Version Machine Virtuelle Java: ART 2.1.0
+Taille du Heap Java VM: 192 Mo
+Architecture Kernel: armv8l
+Version du Kernel: 3.14.29 (zxh@kc-server) (gcc version 4.9.2 20140904 (prerelease) (crosstool-NG linaro-1.13.1-4.9-2014.09 - Linaro GCC 4.9-2014.09) ) #6 SMP PREEMPT Tue May 23 18:22:19 CST 2017
+Tags: test-keys
+Type: userdebug
+Version du Service Google Play: 25.11.34 (040300-740024306)
+Version du Service Huawei Mobile: < Absent >
+Version OpenSSL: BoringSSL
+Version ZLib: 1.2.8
+Version ICU CLDR: 27.0.1
+Version Librairie ICU: 55.1
+Version Unicode ICU: 7.0
+Langage Android: français (France)
+Configured Time Zone: GMT+00:00 (UTC+00:00)
+Temps total activé: 02:09:12
+
+<<< Equipements >>>
+
+<< Périphériques USB - PixArt Dell MS116 USB Optical Mouse >>
+Fabricant: PixArt
+Produit: Dell MS116 USB Optical Mouse
+ID Périphériques: 413C-301A
+Classe Périphériques: 00 / 00
+Protocole Périphériques: 00
+Correctif / revision: 0100
+Version USB Supportée: 2.00
+Puissance Maximum: 100 mA
+
+<< Périphériques USB - Linux 3.14.29 xhci-hcd xHCI Host Controller >>
+Fabricant: Linux 3.14.29 xhci-hcd
+Produit: xHCI Host Controller
+Num Série: xhci-hcd.0.auto
+ID Périphériques: 1D6B-0002
+Classe Périphériques: 09 / 00 (Hi-Speed Hub with single TT)
+Protocole Périphériques: 01
+Correctif / revision: 0314
+Version USB Supportée: 2.00
+Vitesse actuelle: 480 Mb/s
+
+<< Périphériques USB - Linux 3.14.29 xhci-hcd xHCI Host Controller >>
+Fabricant: Linux 3.14.29 xhci-hcd
+Produit: xHCI Host Controller
+Num Série: xhci-hcd.0.auto
+ID Périphériques: 1D6B-0003
+Classe Périphériques: 09 / 00 (Hub)
+Protocole Périphériques: 03
+Correctif / revision: 0314
+Version USB Supportée: 3.00
+Vitesse actuelle: 5000 Mb/s
+
+No cameras found. La permission doit être accordée.
+No OpenCL devices found.
+No CUDA devices found.
+No Vulkan devices found.
+No PCI devices found.
+
+<<< Température >>>
+
+soc_thermal: 63,0°C
+Batterie: 42,4°C
+
+<<< Sondes >>>
+
+capteurs introuvables
+
+<<< Applis >>>
+
+AIDA64: com.finalwire.aida64(v2.19)
+Mobdro: com.mobdro.android(v2.0.30 Freemium)
+myCANAL: com.canal.android.canal(v5.33.0)
+Netflix: com.netflix.mediaclient(v7.120.6 build 63 35594)
+Smarters IPTV: com.smarters.proiptvvideoplayer(v23.31.1003)
+
+<<< Codecs >>>
+
+OMX.amlogic.hevc.decoder.awesome: video/hevc
+OMX.amlogic.avc.decoder.awesome: video/avc
+OMX.amlogic.mpeg4.decoder.awesome: video/mp4v-es
+OMX.amlogic.h263.decoder.awesome: video/3gpp
+OMX.amlogic.mpeg2.decoder.awesome: video/mpeg2
+OMX.amlogic.vc1.decoder.awesome: video/vc1
+OMX.amlogic.wvc1.decoder.awesome: video/wvc1
+OMX.amlogic.wmv3.decoder.awesome: video/wmv3
+OMX.amlogic.mjpeg.decoder.awesome: video/mjpeg
+OMX.amlogic.vp9.decoder.awesome: video/x-vnd.on2.vp9
+OMX.google.amrnb.decoder: audio/3gpp
+OMX.google.amrwb.decoder: audio/amr-wb
+OMX.google.aac.decoder: audio/mp4a-latm
+OMX.google.adif.decoder: audio/aac-adif
+OMX.google.latm.decoder: audio/aac-latm
+OMX.google.adts.decoder: audio/adts
+OMX.google.g711.alaw.decoder: audio/g711-alaw
+OMX.google.g711.mlaw.decoder: audio/g711-mlaw
+OMX.google.adpcm.ima.decoder: audio/adpcm-ima
+OMX.google.adpcm.ms.decoder: audio/adpcm-ms
+OMX.google.vorbis.decoder: audio/vorbis
+OMX.google.alac.decoder: audio/alac
+OMX.google.wma.decoder: audio/wma
+OMX.google.wmapro.decoder: audio/wmapro
+OMX.google.ape.decoder: audio/ape
+OMX.google.truehd.decoder: audio/truehd
+OMX.google.ffmpeg.decoder: audio/ffmpeg
+OMX.google.raw.decoder: audio/raw
+OMX.google.opus.decoder: audio/opus
+OMX.google.mpeg4.decoder: video/mp4v-es
+OMX.google.h263.decoder: video/3gpp
+OMX.google.h264.decoder: video/avc
+OMX.google.vp8.decoder: video/x-vnd.on2.vp8
+OMX.google.vp9.decoder: video/x-vnd.on2.vp9
+OMX.google.vp6.decoder: video/x-vnd.on2.vp6
+OMX.google.vp6a.decoder: video/x-vnd.on2.vp6a
+OMX.google.vp6f.decoder: video/x-vnd.on2.vp6f
+OMX.google.rm10.decoder: video/rm10
+OMX.google.rm20.decoder: video/rm20
+OMX.google.rm40.decoder: video/rm40
+OMX.google.wmv2.decoder: video/wmv2
+OMX.google.wmv1.decoder: video/wmv1
+AML.google.ac3.decoder: audio/ac3
+AML.google.ec3.decoder: audio/eac3
+OMX.google.mp2.decoder: audio/mpeg-L2
+OMX.google.mp3.decoder: audio/mpeg
+AML.google.dtshd.decoder: audio/dtshd
+OMX.google.amrnb.encoder: audio/3gpp
+OMX.google.amrwb.encoder: audio/amr-wb
+OMX.google.aac.encoder: audio/mp4a-latm
+OMX.google.flac.encoder: audio/flac
+OMX.amlogic.video.encoder.avc: video/avc
+OMX.google.mpeg4.encoder: video/mp4v-es
+OMX.google.h263.encoder: video/3gpp
+OMX.google.vp8.encoder: video/x-vnd.on2.vp8
+
+<<< Répertoires >>>
+
+Data: /data
+Root: /system
+Java Home: /system
+Contenu Téléchargement/Cache: /cache
+
+<< Stockage externe >>
+Stockage externe Principal: /storage/emulated/0
+External Files #1: /storage/emulated/0/Android/data/com.finalwire.aida64/files
+Alarmes: /storage/emulated/0/Alarms
+DCIM: /storage/emulated/0/DCIM
+Téléchargements: /storage/emulated/0/Download
+Films: /storage/emulated/0/Movies
+Musique: /storage/emulated/0/Music
+Notifications: /storage/emulated/0/Notifications
+Photos: /storage/emulated/0/Pictures
+Podcasts: /storage/emulated/0/Podcasts
+Sonneries: /storage/emulated/0/Ringtones
+
+<< Points de montage >>
+/: Appareil: rootfs
+Système de fichier: rootfs
+Lecture Seule
+/dev: Appareil: tmpfs
+Système de fichier: tmpfs
+Lecture-Ecriture
+/dev/pts: Appareil: devpts
+Système de fichier: devpts
+Lecture-Ecriture
+/dev/cpuctl: Appareil: none
+Système de fichier: cgroup
+Lecture-Ecriture
+/dev/usb-ffs/adb: Appareil: adb
+Système de fichier: functionfs
+Lecture-Ecriture
+/proc: Appareil: proc
+Système de fichier: proc
+Lecture-Ecriture
+/sys: Appareil: sysfs
+Système de fichier: sysfs
+Lecture-Ecriture
+/sys/fs/selinux: Appareil: selinuxfs
+Système de fichier: selinuxfs
+Lecture-Ecriture
+/sys/kernel/debug: Appareil: /sys/kernel/debug
+Système de fichier: debugfs
+Lecture-Ecriture
+/sys/kernel/config: Appareil: configfs
+Système de fichier: configfs
+Lecture-Ecriture
+/sys/fs/cgroup: Appareil: none
+Système de fichier: tmpfs
+Lecture-Ecriture
+/sys/fs/pstore: Appareil: pstore
+Système de fichier: pstore
+Lecture-Ecriture
+/acct: Appareil: none
+Système de fichier: cgroup
+Lecture-Ecriture
+/mnt: Appareil: tmpfs
+Système de fichier: tmpfs
+Lecture-Ecriture
+/mnt/runtime/default/emulated: Appareil: /dev/fuse
+Système de fichier: fuse
+Lecture-Ecriture
+/mnt/runtime/read/emulated: Appareil: /dev/fuse
+Système de fichier: fuse
+Lecture-Ecriture
+/mnt/runtime/write/emulated: Appareil: /dev/fuse
+Système de fichier: fuse
+Lecture-Ecriture
+/system: Appareil: /dev/block/system
+Système de fichier: ext4
+Lecture Seule
+/data: Appareil: /dev/block/data
+Système de fichier: ext4
+Lecture-Ecriture
+/cache: Appareil: /dev/block/cache
+Système de fichier: ext4
+Lecture-Ecriture
+/tee: Appareil: /dev/block/tee
+Système de fichier: ext4
+Lecture-Ecriture
+/swap_zram0: Appareil: /dev/block/zram0
+Système de fichier: ext4
+Lecture-Ecriture
+/storage: Appareil: tmpfs
+Système de fichier: tmpfs
+Lecture-Ecriture
+/storage/emulated: Appareil: /dev/fuse
+Système de fichier: fuse
+Lecture-Ecriture
+/storage/self: Appareil: tmpfs
+Système de fichier: tmpfs
+Lecture-Ecriture
+
+<<< Système de Fichiers >>>
+
+Buddy Info: /proc/buddyinfo
+Propriétés de la Build: /system/build.prop
+Character & Block Devices: /proc/devices
+Ligne de Commande: /proc/cmdline
+Information CPU: /proc/cpuinfo
+Propriètés par défaut / de base: /default.prop
+Domaines d'Execution: /proc/execdomains
+Système de fichier: /proc/filesystems
+Frame Buffer Devices: /proc/fb
+Hosts: /system/etc/hosts
+Interruptions: /proc/interrupts
+Périphériques d'entrées: /proc/bus/input/devices
+Ports E/S: /proc/ioports
+Version Kernel: /proc/version
+Charge moyenne: /proc/loadavg
+Fichiers Verrouillés: /proc/locks
+Information Mémoire: /proc/meminfo
+Mappage mémoire: /proc/iomem
+Div. Drivers: /proc/misc
+Partitions: /proc/partitions
+Slab Info: /proc/slabinfo
+Statistiques: /proc/stat
+Swap Spaces: /proc/swaps
+
+<<< /proc/cpuinfo >>>
+
+Processor	: AArch64 Processor rev 4 (aarch64)
+processor	: 0
+processor	: 1
+processor	: 2
+processor	: 3
+processor	: 4
+processor	: 5
+processor	: 6
+processor	: 7
+Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32 wp half thumb fastmult vfp edsp neon vfpv3 tlsi vfpv4 idiva idivt 
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU variant	: 0x0
+CPU part	: 0xd03
+CPU revision	: 4
+
+Hardware	: Amlogic
+Serial		: 220a82000ec46269a142e0e8601c991f
+
+<<< /proc/meminfo >>>
+
+MemTotal:        1866000 kB
+MemFree:           43268 kB
+MemAvailable:     940596 kB
+Buffers:            7400 kB
+Cached:           815616 kB
+SwapCached:           60 kB
+Active:           869920 kB
+Inactive:         593864 kB
+Active(anon):     481508 kB
+Inactive(anon):   175556 kB
+Active(file):     388412 kB
+Inactive(file):   418308 kB
+Unevictable:        1676 kB
+Mlocked:               0 kB
+SwapTotal:        511996 kB
+SwapFree:         508468 kB
+Dirty:                 8 kB
+Writeback:             0 kB
+AnonPages:        642468 kB
+Mapped:           307460 kB
+Shmem:             14620 kB
+Slab:             146008 kB
+SReclaimable:     111080 kB
+SUnreclaim:        34928 kB
+KernelStack:       19824 kB
+PageTables:        22688 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     1444996 kB
+Committed_AS:   24345516 kB
+VmallocTotal:    1048576 kB
+VmallocUsed:      103528 kB
+VmallocChunk:     805436 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+
+<<< Comment >>>
+
+Enter your comment here:
+

@@ -1,0 +1,54 @@
+name: iptv_perso
+description: Application IPTV personnalisée pour Android (Samsung S25 Ultra)
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Requêtes HTTP — intercepteurs, retry, timeout
+  dio: ^5.4.0
+
+  # Gestion d'état moderne et typé
+  flutter_riverpod: ^2.5.1
+
+  # Stockage chiffré des credentials (URL, login, mot de passe)
+  flutter_secure_storage: ^9.0.0
+
+  # Cache local — base NoSQL légère pour le catalogue films/séries
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Lecteur vidéo avec décodage matériel (hwdec=auto) — meilleur support HDMI
+  media_kit: ^1.1.10
+  media_kit_video: ^1.2.4
+  media_kit_libs_android_video: ^1.3.2
+
+  # WakeLock — maintien CPU actif, écran pouvant s'éteindre pendant lecture
+  wakelock_plus: ^1.2.5
+
+  # Navigation déclarative
+  go_router: ^13.2.0
+
+  # Contrôle de la luminosité de l'écran (extinction pendant lecture HDMI)
+  screen_brightness: ^0.2.2+1
+
+  # Cache local des images (posters films/séries) — évite re-téléchargement
+  cached_network_image: ^3.3.1
+
+  # Accès aux répertoires de stockage (dossier téléchargements)
+  path_provider: ^2.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  # Générateur de code pour Hive (adaptateurs)
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.8
+
+flutter:
+  uses-material-design: true

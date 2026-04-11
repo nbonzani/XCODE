@@ -21,6 +21,19 @@ env/
 **/data/*.m3u
 **/data/*.m3u8
 
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+*.g.dart
+*.freezed.dart
+pubspec.lock
+
+# Node / JS
+node_modules/
+npm-debug.log*
+
 # IDE
 .vscode/
 .idea/
