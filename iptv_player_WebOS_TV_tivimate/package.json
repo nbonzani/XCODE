@@ -9,9 +9,11 @@
     "preview": "vite preview",
     "lint": "eslint src --ext .js,.jsx --report-unused-disable-directives",
     "format": "prettier --write \"src/**/*.{js,jsx,css}\"",
-    "package": "npm run build && ares-package ./dist",
-    "deploy": "npm run package && ares-install --device tv ./com.iptv.player_1.0.0_all.ipk",
-    "launch": "ares-launch --device tv com.iptv.player"
+    "package": "npm run build && tizen package -t wgt -s TizenCert -- ./dist",
+    "deploy": "npm run package && tizen install -n IPTVPlayer.wgt -t tv-samsung-10.0-x86_64",
+    "launch": "tizen run -p IPTVPlyr.IPTVPlayer -t tv-samsung-10.0-x86_64",
+    "package:webos": "npm run build && ares-package ./dist",
+    "deploy:webos": "npm run package:webos && ares-install --device tv ./com.iptv.player_1.0.0_all.ipk"
   },
   "dependencies": {
     "hls.js": "^1.5.7",

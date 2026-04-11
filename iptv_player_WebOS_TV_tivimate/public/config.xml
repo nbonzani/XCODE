@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  config.xml — Manifest de l'application web Samsung Tizen TV.
+  Remplace appinfo.json (LG webOS).
+
+  ID application : IPTVPlyr.IPTVPlayer
+    - Package     : IPTVPlyr   (5 caractères alphanum, commence par une lettre)
+    - Application : IPTVPlayer
+
+  Pour packager :
+    tizen package -t wgt -s TizenCert - ./dist/
+  Pour installer sur l'emulateur :
+    tizen install -n IPTVPlayer.wgt -t tv-samsung-10.0-x86_64
+  Pour lancer :
+    tizen run -p IPTVPlyr.IPTVPlayer -t tv-samsung-10.0-x86_64
+-->
+<widget xmlns="http://www.w3.org/ns/widgets"
+        xmlns:tizen="http://tizen.org/ns/widgets"
+        id="http://iptv.player/IPTVPlayer"
+        version="1.0.0">
+
+    <!-- Identification Tizen -->
+    <tizen:application id="IPTVPlyr.IPTVPlayer"
+                       package="IPTVPlyr"
+                       required_version="2.4"/>
+
+    <!-- Point d'entrée -->
+    <content src="index.html"/>
+
+    <!-- Métadonnées affichées dans Smart Hub -->
+    <name>IPTV Player</name>
+    <icon src="icon.png"/>
+    <description>Lecteur IPTV Xtream Codes pour Samsung TV</description>
+
+    <!-- Accès réseau (flux IPTV + API Xtream + images) -->
+    <access origin="*" subdomains="true"/>
+
+    <!-- Privilèges nécessaires -->
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <tizen:privilege name="http://tizen.org/privilege/filesystem.read"/>
+    <tizen:privilege name="http://tizen.org/privilege/filesystem.write"/>
+    <tizen:privilege name="http://tizen.org/privilege/power"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.display"/>
+
+    <!-- Profil Samsung TV -->
+    <tizen:profile name="tv-samsung"/>
+
+    <!-- Configuration de l'app -->
+    <tizen:setting screen-orientation="landscape"
+                   context-menu="disable"
+                   background-support="enable"
+                   encryption="disable"
+                   install-location="auto"
+                   hwkey-event="enable"/>
+
+    <!-- Métadonnées Samsung spécifiques (optionnelles) -->
+    <tizen:metadata key="http://samsung.com/tv/metadata/version" value="1.0"/>
+
+</widget>

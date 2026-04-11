@@ -2,13 +2,15 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
-function webosPlugin() {
+function tizenPlugin() {
   return {
-    name: 'webos-fix',
+    name: 'tizen-fix',
     enforce: 'post',
     transformIndexHtml: {
       enforce: 'post',
       transform(html) {
+        // Tizen sert l'app depuis file:// — les imports ES modules ne sont pas supportés.
+        // On supprime type="module" et crossorigin pour forcer le chargement IIFE classique.
         return html
           .replace(/ type="module"/g, '')
           .replace(/ crossorigin/g, '');
@@ -29,7 +31,7 @@ export default defineConfig({
         ],
       },
     }),
-    webosPlugin(),
+    tizenPlugin(),
   ],
 
   base: './',

@@ -1,6 +1,6 @@
 /**
  * src/constants/keyCodes.js
- * Codes de touches de la télécommande LG webOS.
+ * Codes de touches de la télécommande Samsung Tizen TV.
  *
  * Ces constantes correspondent aux valeurs de `event.keyCode` reçues
  * dans les écouteurs `document.addEventListener('keydown', handler)`.
@@ -9,16 +9,8 @@
  *   import { KEY } from '../constants/keyCodes';
  *   if (event.keyCode === KEY.OK) { ... }
  *
- * ⚠️ INCERTITUDE TECHNIQUE DOCUMENTÉE (source : ARCHITECTURE.md §6.2) :
- *   - VK_BACK (461) et VK_EXIT (1001) varient selon le modèle de TV et
- *     la version de webOS. Valeurs testées et confirmées sur webOS 4.x/5.x/6.x.
- *     Une vérification sur le matériel cible (OLED77C1 = webOS 6.0) est nécessaire.
- *   - Sur certains modèles, VK_BACK peut valoir 8 (Backspace) au lieu de 461.
- *     La constante VK_BACK_ALT ci-dessous couvre ce cas.
- *   - Les touches couleur (rouge, vert, jaune, bleu) ne sont pas disponibles
- *     sur toutes les télécommandes LG Magic Remote.
- *
- * Référence officielle LG : https://webostv.developer.lge.com/develop/references/keycode
+ * Référence officielle Samsung :
+ *   https://developer.samsung.com/smarttv/develop/guides/user-interaction/remote-control.html
  */
 
 // =============================================================================
@@ -48,23 +40,21 @@ export const VK_ENTER = 13;
 export const VK_OK = 13;
 
 /**
- * Touche Retour (bouton "Back" de la télécommande LG).
- * ⚠️ Valeur spécifique LG webOS — diffère du standard W3C.
- * Valeur alternative possible : 8 (Backspace) sur certains modèles.
+ * Touche Retour (bouton "Return/Back" de la télécommande Samsung).
+ * Valeur spécifique Samsung Tizen TV.
  */
-export const VK_BACK = 461;
+export const VK_BACK = 10009;
 
 /**
- * Valeur alternative pour VK_BACK sur certains modèles/versions webOS.
- * À utiliser en complément de VK_BACK dans les gestionnaires d'événements.
+ * Valeur alternative pour VK_BACK (Escape sur certains appareils).
  */
-export const VK_BACK_ALT = 8;
+export const VK_BACK_ALT = 27;
 
 /**
- * Touche Quitter / Home (ramène au lanceur d'applications webOS).
- * ⚠️ Valeur spécifique LG webOS.
+ * Touche Home / Smart Hub (ramène au lanceur d'applications Samsung).
+ * Valeur spécifique Samsung Tizen TV.
  */
-export const VK_EXIT = 1001;
+export const VK_EXIT = 10182;
 
 // =============================================================================
 // Contrôles de lecture multimédia
@@ -78,28 +68,25 @@ export const VK_PAUSE = 19;
 
 /**
  * Touche Lecture/Pause combinée (▶⏸).
- * Présente sur les télécommandes LG récentes (Magic Remote et standard).
+ * Valeur spécifique Samsung Tizen TV.
  */
-export const VK_PLAY_PAUSE = 179;
+export const VK_PLAY_PAUSE = 10252;
 
 /** Touche Stop (⏹) */
 export const VK_STOP = 413;
 
 /**
  * Touche Avance rapide (⏩).
- * Disponible sur les télécommandes avec touches de transport multimédia.
  */
 export const VK_FF = 417;
 
 /**
  * Touche Retour rapide (⏪).
- * Disponible sur les télécommandes avec touches de transport multimédia.
  */
 export const VK_REW = 412;
 
 // =============================================================================
-// Touches couleur (disponibles sur télécommandes standard LG)
-// ⚠️ Non disponibles sur Magic Remote — ne pas en faire des fonctions critiques
+// Touches couleur
 // =============================================================================
 
 /** Touche rouge */
@@ -115,7 +102,7 @@ export const VK_YELLOW = 405;
 export const VK_BLUE = 406;
 
 // =============================================================================
-// Touches numériques (utiles pour la navigation de chaînes si nécessaire)
+// Touches numériques
 // =============================================================================
 
 export const VK_0 = 48;

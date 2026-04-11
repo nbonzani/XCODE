@@ -61,30 +61,16 @@ function useWakeLock() {
   useEffect(function() {
     var cleanups = [];
 
-    // ── Méthode 1 : Luna subscribe (webOS TV) ──────────────────────────────
-    // S'abonner à un service Luna maintient l'app "active" côté système.
-    // On écoute aussi l'état écran pour le réveiller si nécessaire.
+    // ── Méthode 1 : Tizen Power API (Samsung Tizen TV) ────────────────────
+    // tizen.power.request('SCREEN', 'SCREEN_NORMAL') empêche la mise en veille.
     try {
-      if (typeof webOS !== 'undefined' && webOS.service) {
-        var req = webOS.service.request('luna://com.webos.service.tvpower/power', {
-          method: 'getPowerState',
-          subscribe: true,
-          onSuccess: function(res) {
-            // Si l'écran est en train de s'éteindre, on le réveille
-            if (res && res.state && res.state.toLowerCase().indexOf('sleep') !== -1) {
-              webOS.service.request('luna://com.webos.service.tvpower/power', {
-                method: 'wakeUpScreen',
-                parameters: {},
-                onSuccess: function() {},
-                onFailure: function() {},
-              });
-            }
-          },
-          onFailure: function() {},
+      if (typeof tizen !== 'undefined' && tizen.power) {
+        tizen.power.request('SCREEN', 'SCREEN_NORMAL');
+        cleanups.push(function() {
+          try { tizen.power.release('SCREEN'); } catch (e) {}
         });
-        cleanups.push(function() { if (req && req.cancel) req.cancel(); });
       }
-    } catch (e) { /* non webOS */ }
+    } catch (e) { /* API tizen non disponible */ }
 
     // ── Méthode 2 : AudioContext silencieux (fallback Chromium) ───────────
     // Un oscillateur à gain 0 maintient l'AudioContext actif et empêche
