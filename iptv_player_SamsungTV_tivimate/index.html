@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Samsung Tizen TV : résolution fixe 1920x1080.
+      Le viewport est verrouillé : pas de zoom, pas de redimensionnement utilisateur.
+    -->
+    <meta
+      name="viewport"
+      content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+
+    <!--
+      Content Security Policy adaptée Tizen TV :
+      - Les flux Xtream sont en HTTP (non HTTPS) → on autorise http: pour media-src et img-src.
+      - connect-src http: autorise les appels fetch() vers le serveur Xtream.
+      - unsafe-inline nécessaire pour les styles CSS-in-JS injectés par Vite en dev.
+    -->
+    <!-- Désactive la détection automatique de numéros de téléphone -->
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Empêche le survol/sélection de texte parasite lors de la navigation télécommande -->
+    <meta name="HandheldFriendly" content="true" />
+
+    <title>IPTV Player</title>
+
+    <style>
+      /* Chargement critique minimal — évite le flash blanc au démarrage */
+      html,
+      body,
+      #root {
+        margin: 0;
+        padding: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background-color: #0a0a0f;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      Point de montage React.
+      L'application React est entièrement rendue à l'intérieur de ce div.
+    -->
+    <div id="root"></div>
+
+    <!--
+      Vite injecte ici le script bundle au moment du build.
+      En développement, le module src/index.jsx est chargé directement.
+    -->
+    <script type="module" src="/src/index.jsx"></script>
+  </body>
+</html>
