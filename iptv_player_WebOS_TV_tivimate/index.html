@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <!--
-      Samsung Tizen TV : résolution fixe 1920x1080.
+      webOS exige une résolution fixe 1920x1080.
       Le viewport est verrouillé : pas de zoom, pas de redimensionnement utilisateur.
     -->
     <meta
@@ -12,12 +12,12 @@
     />
 
     <!--
-      Content Security Policy adaptée Tizen TV :
+      Content Security Policy adaptée webOS :
       - Les flux Xtream sont en HTTP (non HTTPS) → on autorise http: pour media-src et img-src.
       - connect-src http: autorise les appels fetch() vers le serveur Xtream.
       - unsafe-inline nécessaire pour les styles CSS-in-JS injectés par Vite en dev.
     -->
-    <!-- Désactive la détection automatique de numéros de téléphone -->
+        <!-- Désactive la détection automatique de numéros de téléphone par webOS -->
     <meta name="format-detection" content="telephone=no" />
 
     <!-- Empêche le survol/sélection de texte parasite lors de la navigation télécommande -->
@@ -25,6 +25,11 @@
 
     <title>IPTV Player</title>
 
+    <!--
+      Préchargement des polices système webOS.
+      webOS embarque LG Smart UI (police propriétaire).
+      On déclare un fallback vers les polices système génériques.
+    -->
     <style>
       /* Chargement critique minimal — évite le flash blanc au démarrage */
       html,

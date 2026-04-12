@@ -1,48 +1,49 @@
 /**
  * src/services/usbService.js
- * Accès USB et parsing M3U pour Samsung Tizen TV.
+ * Accès USB et parsing M3U pour webOS TV.
  *
  * Stratégie :
- * 1. Détection USB via tizen.filesystem API (storages de type "REMOVABLE")
- * 2. Lecture du fichier via tizen.filesystem.resolve() + FileReader
+ * 1. Détection USB via luna service com.webos.service.mediaindexer
+ * 2. Lecture du fichier via XMLHttpRequest file://
  * 3. Parsing M3U standard (#EXTM3U / #EXTINF)
  *
- * Fallback : saisie manuelle du chemin si l'API Tizen n'est pas disponible.
+ * Fallback : saisie manuelle du chemin si luna n'est pas disponible.
  */
 
 // ── Détection des périphériques USB ──────────────────────────────────────────
 
 /**
- * Détecte les périphériques USB connectés à la TV via l'API Tizen filesystem.
+ * Détecte les périphériques USB connectés à la TV via luna service.
  * @returns {Promise<Array<{ uri: string, name: string }>>}
  */
 export function detectUsbDevices() {
-  return new Promise(function (resolve) {
-    // Vérifier si on est sur Tizen (API disponible)
-    if (typeof tizen === 'undefined' || !tizen.filesystem) {
-      console.warn('[USB] tizen.filesystem non disponible — mode simulateur');
+  return new Promise((resolve) => {
+    // Vérifier si on est sur webOS (luna disponible)
+    if (typeof window.webOS === 'undefined' || !window.webOS.service) {
+      console.warn('[USB] webOS.service non disponible — mode simulateur');
       resolve([]);
       return;
     }
 
     try {
-      tizen.filesystem.listStorages(function (storages) {
-        var devices = [];
-        for (var i = 0; i < storages.length; i++) {
-          var s = storages[i];
-          // Type REMOVABLE = USB / carte SD
-          if (s.type === 'REMOVABLE' && s.state === 'MOUNTED') {
-            devices.push({ uri: s.label, name: s.label });
-          }
-        }
-        console.log('[USB] Devices trouvés:', devices.length);
-        resolve(devices);
-      }, function (err) {
-        console.warn('[USB] Erreur listStorages:', err);
-        resolve([]);
+      window.webOS.service.request('luna://com.webos.service.mediaindexer', {
+        method: 'getDeviceList',
+        onSuccess: function (res) {
+          const devices = (res.deviceList || [])
+            .filter(function (d) { return d.uri && d.available; })
+            .map(function (d) {
+              return { uri: d.uri, name: d.name || d.uri };
+            });
+          console.log('[USB] Devices trouvés:', devices.length);
+          resolve(devices);
+        },
+        onFailure: function (err) {
+          console.warn('[USB] Erreur getDeviceList:', err);
+          resolve([]);
+        },
       });
     } catch (e) {
-      console.warn('[USB] Exception tizen.filesystem:', e);
+      console.warn('[USB] Exception luna:', e);
       resolve([]);
     }
   });
@@ -202,12 +203,13 @@ function parseExtInf(line) {
 // ── Chemins USB courants ─────────────────────────────────────────────────────
 
 /**
- * Labels de stockage USB courants sur Samsung Tizen TV.
- * Utilisés en fallback si l'API tizen.filesystem n'est pas disponible.
+ * Chemins de montage USB courants sur webOS TV.
+ * Utilisés en fallback si luna n'est pas disponible.
  */
 export var USB_PATHS = [
-  'removable0',
-  'removable1',
-  'wgt-private',
-  'wgt-private-tmp',
+  '/tmp/usb/sda/sda1',
+  '/tmp/usb/sda/sda2',
+  '/tmp/usb/sdb/sdb1',
+  '/tmp/usb/sdb/sdb2',
+  '/media/USB_Storage',
 ];
