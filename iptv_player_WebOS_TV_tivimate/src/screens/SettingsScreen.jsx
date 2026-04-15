@@ -143,7 +143,6 @@ export default function SettingsScreen() {
   const [serverUrl,  setServerUrl]  = useState(config.serverUrl  || '');
   const [username,   setUsername]   = useState(config.username   || '');
   const [password,   setPassword]   = useState(config.password   || '');
-  const [frenchOnly, setFrenchOnly] = useState(config.frenchOnly !== undefined ? config.frenchOnly : true);
 
   const [connectionStatus,   setConnectionStatus]   = useState(null);
   const [validationError,    setValidationError]     = useState('');
@@ -163,15 +162,14 @@ export default function SettingsScreen() {
   const urlRef      = useRef(null);
   const usernameRef = useRef(null);
   const passwordRef = useRef(null);
-  const toggleRef   = useRef(null);
   const testBtnRef  = useRef(null);
   const saveBtnRef  = useRef(null);
   const m3uScanRef  = useRef(null);
   const m3uPathRef  = useRef(null);
   const m3uLoadRef  = useRef(null);
 
-  // Ordre : 0=url 1=username 2=password 3=toggle 4=test 5=save 6=scanUSB 7=m3uPath 8=loadM3U
-  const fieldOrder = [urlRef, usernameRef, passwordRef, toggleRef, testBtnRef, saveBtnRef, m3uScanRef, m3uPathRef, m3uLoadRef];
+  // Ordre : 0=url 1=username 2=password 3=test 4=save 5=scanUSB 6=m3uPath 7=loadM3U
+  const fieldOrder = [urlRef, usernameRef, passwordRef, testBtnRef, saveBtnRef, m3uScanRef, m3uPathRef, m3uLoadRef];
 
   const applyFocus = useCallback((idx) => {
     const i = Math.max(0, Math.min(idx, fieldOrder.length - 1));
@@ -206,11 +204,11 @@ export default function SettingsScreen() {
         } else if (e.keyCode === KEY.UP) {
           e.preventDefault();
           setInLangArea(false);
-          applyFocus(4);
+          applyFocus(3);
         } else if (e.keyCode === KEY.DOWN) {
           e.preventDefault();
           setInLangArea(false);
-          applyFocus(5);
+          applyFocus(4);
         } else if (e.keyCode === KEY.OK) {
           const el = document.activeElement;
           if (el && el.tagName === 'BUTTON') { e.preventDefault(); el.click(); }
@@ -226,8 +224,8 @@ export default function SettingsScreen() {
         navigate('/');
       } else if (e.keyCode === KEY.DOWN) {
         e.preventDefault();
-        if (showLangPicker && focusedIdx === 4) {
-          // Descendre vers zone langue
+        if (showLangPicker && focusedIdx === 3) {
+          // Descendre vers zone langue (bouton Test = idx 3)
           setInLangArea(true);
           setLangFocusedIdx(0);
           langButtonRefs.current[0]?.focus();
@@ -237,18 +235,18 @@ export default function SettingsScreen() {
       } else if (e.keyCode === KEY.UP) {
         e.preventDefault();
         applyFocus(focusedIdx - 1);
-      } else if (e.keyCode === KEY.RIGHT && focusedIdx === 4) {
-        e.preventDefault();
-        applyFocus(5);
-      } else if (e.keyCode === KEY.LEFT && focusedIdx === 5) {
+      } else if (e.keyCode === KEY.RIGHT && focusedIdx === 3) {
         e.preventDefault();
         applyFocus(4);
-      } else if (e.keyCode === KEY.RIGHT && focusedIdx === 6) {
+      } else if (e.keyCode === KEY.LEFT && focusedIdx === 4) {
         e.preventDefault();
-        applyFocus(8);
-      } else if (e.keyCode === KEY.LEFT && focusedIdx === 8) {
+        applyFocus(3);
+      } else if (e.keyCode === KEY.RIGHT && focusedIdx === 5) {
         e.preventDefault();
-        applyFocus(6);
+        applyFocus(7);
+      } else if (e.keyCode === KEY.LEFT && focusedIdx === 7) {
+        e.preventDefault();
+        applyFocus(5);
       } else if (e.keyCode === KEY.OK) {
         const el = document.activeElement;
         if (el && el.tagName === 'BUTTON') {
@@ -312,7 +310,8 @@ export default function SettingsScreen() {
     try {
       const existing = useAppStore.getState().config;
       saveConfig({
-        serverUrl: normalizeUrl(serverUrl), port: '', username: username.trim(), password: password.trim(), frenchOnly,
+        serverUrl: normalizeUrl(serverUrl), port: '', username: username.trim(), password: password.trim(),
+        frenchOnly: false,
         filterLanguage: existing.filterLanguage || '',
         selectedMovieCategories: existing.selectedMovieCategories || [],
         selectedSeriesCategories: existing.selectedSeriesCategories || [],
@@ -321,13 +320,13 @@ export default function SettingsScreen() {
     } catch {
       setValidationError('Erreur lors de la sauvegarde. Réessayez.');
     }
-  }, [serverUrl, username, password, frenchOnly, validate, saveConfig, navigate]);
+  }, [serverUrl, username, password, validate, saveConfig, navigate]);
 
   const handleLanguageSelect = useCallback(async (lang) => {
     if (isLoadingCats) return;
     const baseConfig = {
       serverUrl: normalizeUrl(serverUrl), port: '', username: username.trim(),
-      password: password.trim(), frenchOnly,
+      password: password.trim(), frenchOnly: false,
     };
 
     if (lang === '') {
@@ -464,12 +463,6 @@ export default function SettingsScreen() {
             <FocusableField ref={passwordRef} id="password" label="Mot de passe"      value={password}  onChange={setPassword}  placeholder="Appuyez sur OK pour saisir…" isFocused={focusedIdx===2} onNext={() => applyFocus(3)} />
           </section>
 
-          <section className="settings-group">
-            <h2 className="settings-group__title">Filtres de contenu</h2>
-            <ToggleSwitch checked={frenchOnly} onChange={setFrenchOnly} divRef={toggleRef} isFocused={focusedIdx===3} />
-            <p className="settings-info">ℹ Conserve les catégories dont le nom commence par "FR"</p>
-          </section>
-
           {validationError && <p className="settings-error">⚠ {validationError}</p>}
           <ConnectionStatus status={connectionStatus} />
 
@@ -508,21 +501,21 @@ export default function SettingsScreen() {
           <div className="settings-actions">
             <button
               ref={testBtnRef}
-              className={`settings-btn settings-btn--test action-button ${fc(4)}`}
+              className={`settings-btn settings-btn--test action-button ${fc(3)}`}
               tabIndex={0}
               onClick={handleTestConnection}
               disabled={isTesting}
-              onFocus={() => setFocusedIdx(4)}
+              onFocus={() => setFocusedIdx(3)}
             >
               🔌 Tester la connexion
             </button>
             <div className="settings-actions__right">
               <button
                 ref={saveBtnRef}
-                className={`settings-btn settings-btn--save action-button ${fc(5)}`}
+                className={`settings-btn settings-btn--save action-button ${fc(4)}`}
                 tabIndex={0}
                 onClick={handleSave}
-                onFocus={() => setFocusedIdx(5)}
+                onFocus={() => setFocusedIdx(4)}
               >
                 Enregistrer
               </button>
@@ -544,11 +537,11 @@ export default function SettingsScreen() {
             <div className="settings-m3u-row">
               <button
                 ref={m3uScanRef}
-                className={`settings-btn settings-btn--scan action-button ${fc(6)}`}
+                className={`settings-btn settings-btn--scan action-button ${fc(5)}`}
                 tabIndex={0}
                 onClick={handleScanUsb}
                 disabled={isScanning}
-                onFocus={() => setFocusedIdx(6)}
+                onFocus={() => setFocusedIdx(5)}
               >
                 🔍 Rechercher sur USB
               </button>
@@ -561,17 +554,17 @@ export default function SettingsScreen() {
               value={m3uPath}
               onChange={setM3uPath}
               placeholder="/tmp/usb/sda/sda1/playlist.m3u"
-              isFocused={focusedIdx===7}
-              onNext={() => applyFocus(8)}
+              isFocused={focusedIdx===6}
+              onNext={() => applyFocus(7)}
             />
 
             <div className="settings-m3u-row">
               <button
                 ref={m3uLoadRef}
-                className={`settings-btn settings-btn--load action-button ${fc(8)}`}
+                className={`settings-btn settings-btn--load action-button ${fc(7)}`}
                 tabIndex={0}
                 onClick={handleLoadM3u}
-                onFocus={() => setFocusedIdx(8)}
+                onFocus={() => setFocusedIdx(7)}
               >
                 📂 Charger le fichier M3U
               </button>

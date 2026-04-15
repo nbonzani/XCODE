@@ -37,6 +37,7 @@ export default function HomeScreen() {
 
   const { config, activeTab, setActiveTab, syncStatus } = useAppStore();
   const {
+    allMovies, allSeries,
     filteredMovies, filteredSeries,
     movieCategories, seriesCategories,
     searchQuery, selectedCategoryId,
@@ -144,14 +145,15 @@ export default function HomeScreen() {
   }, []);
 
   // ── Catégories filtrées ────────────────────────────────────────────────
-  const rawCategories   = activeTab === 'movies' ? movieCategories : seriesCategories;
-  const frenchFiltered  = rawCategories.filter((c) => {
-    const n = c.category_name || '';
-    return /(^|[^A-Za-z])FR(?![A-Za-z])/.test(n) || /(^|[^A-Za-z])(?:FRENCH|FRANCE)(?![A-Za-z])/i.test(n);
-  });
-  const activeCategories = config.frenchOnly && frenchFiltered.length > 0
-    ? frenchFiltered
-    : rawCategories;
+  // Ne montrer dans la sidebar que les catégories qui ont au moins un item chargé
+  const rawCategories = activeTab === 'movies' ? movieCategories : seriesCategories;
+  const loadedItems   = activeTab === 'movies' ? allMovies : allSeries;
+  const presentCatIds = React.useMemo(() => {
+    const s = new Set();
+    loadedItems.forEach((item) => s.add(String(item.category_id)));
+    return s;
+  }, [loadedItems]);
+  const activeCategories = rawCategories.filter((c) => presentCatIds.has(String(c.category_id)));
 
   // ── Filtres ────────────────────────────────────────────────────────────
   const selMovCats = config.selectedMovieCategories  || [];
