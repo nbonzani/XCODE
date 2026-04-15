@@ -149,10 +149,15 @@ export default function SettingsScreen() {
   const [isTesting,          setIsTesting]           = useState(false);
   const [focusedIdx,         setFocusedIdx]          = useState(0);
   const [showLangPicker,     setShowLangPicker]      = useState(false);
+  const [selectedLangs,      setSelectedLangs]       = useState([]);   // multi-sélection
   const [langFocusedIdx,     setLangFocusedIdx]      = useState(0);
   const [isLoadingCats,      setIsLoadingCats]       = useState(false);
   const [inLangArea,         setInLangArea]          = useState(false);
   const langButtonRefs = useRef([]);
+  const continuerRef   = useRef(null);
+  const toutRef        = useRef(null);
+  const [inLangActions, setInLangActions]            = useState(false); // zone Tout/Continuer
+  const [langActionIdx, setLangActionIdx]            = useState(0);     // 0=Tout 1=Continuer
 
   // ── Import M3U ──────────────────────────────────────────────────────────
   const [m3uStatus, setM3uStatus]     = useState(null);  // { type, message, files? }
@@ -189,8 +194,9 @@ export default function SettingsScreen() {
       // Ignorer si un input est actif (clavier virtuel ouvert)
       if (document.activeElement?.tagName === 'INPUT') return;
 
-      // Zone langue : navigation horizontale parmi les 5 boutons
+      // Zone langue – ligne 1 : boutons de langue (FR IT DE EN ES)
       if (inLangArea) {
+        const LANG_COUNT = 5; // FR IT DE EN ES
         if (e.keyCode === KEY.LEFT) {
           e.preventDefault();
           const next = Math.max(0, langFocusedIdx - 1);
@@ -198,7 +204,7 @@ export default function SettingsScreen() {
           langButtonRefs.current[next]?.focus();
         } else if (e.keyCode === KEY.RIGHT) {
           e.preventDefault();
-          const next = Math.min(4, langFocusedIdx + 1);
+          const next = Math.min(LANG_COUNT - 1, langFocusedIdx + 1);
           setLangFocusedIdx(next);
           langButtonRefs.current[next]?.focus();
         } else if (e.keyCode === KEY.UP) {
@@ -208,6 +214,36 @@ export default function SettingsScreen() {
         } else if (e.keyCode === KEY.DOWN) {
           e.preventDefault();
           setInLangArea(false);
+          setInLangActions(true);
+          setLangActionIdx(0);
+          toutRef.current?.focus();
+        } else if (e.keyCode === KEY.OK) {
+          const el = document.activeElement;
+          if (el && el.tagName === 'BUTTON') { e.preventDefault(); el.click(); }
+        } else if (isBackKey(e.keyCode) && isConfigured) {
+          e.preventDefault();
+          navigate('/');
+        }
+        return;
+      }
+
+      // Zone langue – ligne 2 : Tout / Continuer
+      if (inLangActions) {
+        if (e.keyCode === KEY.LEFT) {
+          e.preventDefault();
+          setLangActionIdx(0);
+          toutRef.current?.focus();
+        } else if (e.keyCode === KEY.RIGHT) {
+          e.preventDefault();
+          if (selectedLangs.length > 0) { setLangActionIdx(1); continuerRef.current?.focus(); }
+        } else if (e.keyCode === KEY.UP) {
+          e.preventDefault();
+          setInLangActions(false);
+          setInLangArea(true);
+          langButtonRefs.current[langFocusedIdx]?.focus();
+        } else if (e.keyCode === KEY.DOWN) {
+          e.preventDefault();
+          setInLangActions(false);
           applyFocus(4);
         } else if (e.keyCode === KEY.OK) {
           const el = document.activeElement;
@@ -257,7 +293,7 @@ export default function SettingsScreen() {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [isConfigured, navigate, focusedIdx, applyFocus, inLangArea, langFocusedIdx, showLangPicker]);
+  }, [isConfigured, navigate, focusedIdx, applyFocus, inLangArea, langFocusedIdx, showLangPicker, inLangActions, langActionIdx, selectedLangs]);
 
   const normalizeUrl = (url) => {
     const t = url.trim();
@@ -291,7 +327,9 @@ export default function SettingsScreen() {
       });
       success = true;
       setShowLangPicker(true);
+      setSelectedLangs([]);
       setLangFocusedIdx(0);
+      setInLangActions(false);
       setTimeout(() => {
         setInLangArea(true);
         langButtonRefs.current[0]?.focus();
@@ -322,25 +360,31 @@ export default function SettingsScreen() {
     }
   }, [serverUrl, username, password, validate, saveConfig, navigate]);
 
-  const handleLanguageSelect = useCallback(async (lang) => {
-    if (isLoadingCats) return;
+  const toggleLang = useCallback((lang) => {
+    setSelectedLangs((prev) =>
+      prev.includes(lang) ? prev.filter((l) => l !== lang) : [...prev, lang]
+    );
+  }, []);
+
+  const handleTout = useCallback(() => {
     const baseConfig = {
       serverUrl: normalizeUrl(serverUrl), port: '', username: username.trim(),
       password: password.trim(), frenchOnly: false,
     };
-
-    if (lang === '') {
-      // "Tout" : pas de filtre catégorie
-      try {
-        saveConfig({ ...baseConfig, filterLanguage: '', selectedMovieCategories: [], selectedSeriesCategories: [] });
-        navigate('/');
-      } catch {
-        setValidationError('Erreur lors de la sauvegarde.');
-      }
-      return;
+    try {
+      saveConfig({ ...baseConfig, filterLanguage: [], selectedMovieCategories: [], selectedSeriesCategories: [] });
+      navigate('/');
+    } catch {
+      setValidationError('Erreur lors de la sauvegarde.');
     }
+  }, [serverUrl, username, password, saveConfig, navigate]);
 
-    // Langue sélectionnée → charger les catégories et ouvrir l'écran de filtre
+  const handleContinuer = useCallback(async () => {
+    if (isLoadingCats || selectedLangs.length === 0) return;
+    const baseConfig = {
+      serverUrl: normalizeUrl(serverUrl), port: '', username: username.trim(),
+      password: password.trim(), frenchOnly: false,
+    };
     setIsLoadingCats(true);
     try {
       const client = new XtreamClient(normalizeUrl(serverUrl), '', username.trim(), password.trim());
@@ -348,15 +392,14 @@ export default function SettingsScreen() {
         client.getVodCategories(),
         client.getSeriesCategories(),
       ]);
-      // Pré-sauvegarder la config sans sélection de catégories (sera mis à jour dans CatalogFilterScreen)
-      saveConfig({ ...baseConfig, filterLanguage: lang, selectedMovieCategories: [], selectedSeriesCategories: [] });
-      navigate('/catalog-filter', { state: { language: lang, movieCategories: movieCats, seriesCategories: seriesCats } });
+      saveConfig({ ...baseConfig, filterLanguage: selectedLangs, selectedMovieCategories: [], selectedSeriesCategories: [] });
+      navigate('/catalog-filter', { state: { languages: selectedLangs, movieCategories: movieCats, seriesCategories: seriesCats } });
     } catch (err) {
       setValidationError(`Erreur chargement catégories : ${err.message}`);
     } finally {
       setIsLoadingCats(false);
     }
-  }, [serverUrl, username, password, isLoadingCats, saveConfig, navigate]);
+  }, [serverUrl, username, password, selectedLangs, isLoadingCats, saveConfig, navigate]);
 
   // ── Import M3U : scan USB ──────────────────────────────────────────────
   const handleScanUsb = useCallback(async () => {
@@ -469,32 +512,58 @@ export default function SettingsScreen() {
           {showLangPicker && (
             <div className="settings-lang-picker">
               <p className="settings-lang-picker__title">
-                {isLoadingCats ? 'Chargement des catégories…' : 'Choisissez une langue pour filtrer le catalogue :'}
+                {isLoadingCats ? 'Chargement des catégories…' : 'Sélectionnez une ou plusieurs langues :'}
               </p>
               {isLoadingCats ? (
                 <div className="spinner" style={{ width: 40, height: 40, margin: '0 auto' }} />
-              ) : (
+              ) : (<>
                 <div className="settings-lang-picker__buttons">
                   {[
-                    { lang: 'FR', label: 'Français' },
-                    { lang: 'IT', label: 'Italien' },
-                    { lang: 'EN', label: 'Anglais' },
-                    { lang: 'DE', label: 'Allemand' },
-                    { lang: '',   label: 'Tout' },
-                  ].map(({ lang, label }, i) => (
-                    <button
-                      key={lang || 'all'}
-                      ref={(el) => { langButtonRefs.current[i] = el; }}
-                      className={`settings-lang-btn ${inLangArea && langFocusedIdx === i ? 'focused' : ''}`}
-                      tabIndex={0}
-                      onFocus={() => { setInLangArea(true); setLangFocusedIdx(i); }}
-                      onClick={() => handleLanguageSelect(lang)}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                    { lang: 'FR', label: 'FR — Français' },
+                    { lang: 'IT', label: 'IT — Italien' },
+                    { lang: 'DE', label: 'DE — Allemand' },
+                    { lang: 'EN', label: 'EN — Anglais' },
+                    { lang: 'ES', label: 'ES — Espagnol' },
+                  ].map(({ lang, label }, i) => {
+                    const sel = selectedLangs.includes(lang);
+                    return (
+                      <button
+                        key={lang}
+                        ref={(el) => { langButtonRefs.current[i] = el; }}
+                        className={`settings-lang-btn ${sel ? 'selected' : ''} ${inLangArea && langFocusedIdx === i ? 'focused' : ''}`}
+                        tabIndex={0}
+                        onFocus={() => { setInLangArea(true); setInLangActions(false); setLangFocusedIdx(i); }}
+                        onClick={() => toggleLang(lang)}
+                      >
+                        <span className="settings-lang-btn__check">{sel ? '☑' : '☐'}</span>
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
-              )}
+                <div className="settings-lang-picker__actions">
+                  <button
+                    ref={toutRef}
+                    className={`settings-lang-btn settings-lang-btn--tout ${inLangActions && langActionIdx === 0 ? 'focused' : ''}`}
+                    tabIndex={0}
+                    onFocus={() => { setInLangActions(true); setInLangArea(false); setLangActionIdx(0); }}
+                    onClick={handleTout}
+                  >
+                    Tout le catalogue
+                  </button>
+                  {selectedLangs.length > 0 && (
+                    <button
+                      ref={continuerRef}
+                      className={`settings-lang-btn settings-lang-btn--continuer ${inLangActions && langActionIdx === 1 ? 'focused' : ''}`}
+                      tabIndex={0}
+                      onFocus={() => { setInLangActions(true); setInLangArea(false); setLangActionIdx(1); }}
+                      onClick={handleContinuer}
+                    >
+                      Continuer →
+                    </button>
+                  )}
+                </div>
+              </>)}
             </div>
           )}
 

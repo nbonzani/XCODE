@@ -18,7 +18,7 @@ const DEFAULT_CONFIG = {
   username:   '',
   password:   '',
   frenchOnly: true,
-  filterLanguage:           '',  // 'FR' | 'IT' | 'EN' | 'DE' | '' (tout)
+  filterLanguage:           [],  // ['FR','IT',...] | [] (tout)
   selectedMovieCategories:  [],  // [] = toutes, [id, ...] = filtrées
   selectedSeriesCategories: [],  // [] = toutes, [id, ...] = filtrées
 };

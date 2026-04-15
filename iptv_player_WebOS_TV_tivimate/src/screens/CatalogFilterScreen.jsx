@@ -15,15 +15,21 @@ import { useAppStore } from '../store/appStore.js';
 import { KEY } from '../constants/keyCodes.js';
 import './CatalogFilterScreen.css';
 
-// Détecte si une catégorie correspond à une langue donnée
-function matchesLanguage(categoryName, lang) {
-  const n = categoryName || '';
-  if (!lang) return true;
-  if (lang === 'FR') return /(^|[^A-Za-z])FR(?![A-Za-z])/.test(n) || /(^|[^A-Za-z])(?:FRENCH|FRANCE|VF|VO\s*FR)(?![A-Za-z])/i.test(n);
+// Détecte si un nom de catégorie contient le code langue donné
+function matchesOneLang(name, lang) {
+  const n = name || '';
+  if (lang === 'FR') return /(^|[^A-Za-z])FR(?![A-Za-z])/.test(n) || /(^|[^A-Za-z])(?:FRENCH|FRANCE|VF)(?![A-Za-z])/i.test(n);
   if (lang === 'IT') return /(^|[^A-Za-z])IT(?![A-Za-z])/.test(n) || /\b(?:ITALIAN|ITALIE|ITALIANO)\b/i.test(n);
   if (lang === 'EN') return /(^|[^A-Za-z])(?:EN|UK|US)(?![A-Za-z])/.test(n) || /\b(?:ENGLISH|ANGLAIS)\b/i.test(n);
   if (lang === 'DE') return /(^|[^A-Za-z])DE(?![A-Za-z])/.test(n) || /\b(?:GERMAN|DEUTSCH|ALLEMAND)\b/i.test(n);
-  return true;
+  if (lang === 'ES') return /(^|[^A-Za-z])ES(?![A-Za-z])/.test(n) || /\b(?:SPANISH|ESPAGNOL|ESPAÑOL|ESPAÑA)\b/i.test(n);
+  return false;
+}
+
+// Détecte si un nom de catégorie correspond à l'une des langues sélectionnées
+function matchesLanguages(categoryName, langs) {
+  if (!langs || langs.length === 0) return true;
+  return langs.some((lang) => matchesOneLang(categoryName, lang));
 }
 
 export default function CatalogFilterScreen() {
@@ -31,11 +37,11 @@ export default function CatalogFilterScreen() {
   const location  = useLocation();
   const { config, saveConfig } = useAppStore();
 
-  const { language = '', movieCategories = [], seriesCategories = [] } = location.state || {};
+  const { languages = [], movieCategories = [], seriesCategories = [] } = location.state || {};
 
-  // Filtrer les catégories par langue sélectionnée (pré-sélection)
-  const filteredMovieCats  = movieCategories.filter((c) => matchesLanguage(c.category_name, language));
-  const filteredSeriesCats = seriesCategories.filter((c) => matchesLanguage(c.category_name, language));
+  // Filtrer les catégories par langues sélectionnées (pré-sélection)
+  const filteredMovieCats  = movieCategories.filter((c) => matchesLanguages(c.category_name, languages));
+  const filteredSeriesCats = seriesCategories.filter((c) => matchesLanguages(c.category_name, languages));
 
   // Si aucune catégorie ne correspond, afficher toutes
   const displayMovieCats  = filteredMovieCats.length  > 0 ? filteredMovieCats  : movieCategories;
@@ -109,7 +115,7 @@ export default function CatalogFilterScreen() {
     const serIds = selectedSeriesIds.size > 0 ? [...selectedSeriesIds] : [];
     saveConfig({
       ...config,
-      filterLanguage: language,
+      filterLanguage: languages,
       selectedMovieCategories:  movIds,
       selectedSeriesCategories: serIds,
     });
@@ -228,7 +234,7 @@ export default function CatalogFilterScreen() {
       <div className="catalog-filter-header">
         <h1 className="catalog-filter-title">Sélection des catégories</h1>
         <p className="catalog-filter-subtitle">
-          Langue : <strong>{language || 'Tout'}</strong> — Cochez les catégories à inclure dans votre catalogue
+          Langues : <strong>{languages.length > 0 ? languages.join(', ') : 'Tout'}</strong> — Cochez les catégories à inclure dans votre catalogue
         </p>
       </div>
 
