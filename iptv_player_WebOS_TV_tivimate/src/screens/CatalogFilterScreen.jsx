@@ -1,0 +1,295 @@
+/**
+ * CatalogFilterScreen.jsx
+ * Permet à l'utilisateur de choisir les catégories à inclure dans le catalogue.
+ * Affiché après la sélection d'une langue dans SettingsScreen.
+ *
+ * Navigation télécommande :
+ *   Tab Films / Séries : ←→ entre onglets
+ *   Liste catégories   : ↑↓ navigation, OK pour cocher/décocher
+ *   Bouton OK          : valide la sélection
+ */
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useAppStore } from '../store/appStore.js';
+import { KEY } from '../constants/keyCodes.js';
+import './CatalogFilterScreen.css';
+
+// Détecte si une catégorie correspond à une langue donnée
+function matchesLanguage(categoryName, lang) {
+  const n = categoryName || '';
+  if (!lang) return true;
+  if (lang === 'FR') return /(^|[^A-Za-z])FR(?![A-Za-z])/.test(n) || /(^|[^A-Za-z])(?:FRENCH|FRANCE|VF|VO\s*FR)(?![A-Za-z])/i.test(n);
+  if (lang === 'IT') return /(^|[^A-Za-z])IT(?![A-Za-z])/.test(n) || /\b(?:ITALIAN|ITALIE|ITALIANO)\b/i.test(n);
+  if (lang === 'EN') return /(^|[^A-Za-z])(?:EN|UK|US)(?![A-Za-z])/.test(n) || /\b(?:ENGLISH|ANGLAIS)\b/i.test(n);
+  if (lang === 'DE') return /(^|[^A-Za-z])DE(?![A-Za-z])/.test(n) || /\b(?:GERMAN|DEUTSCH|ALLEMAND)\b/i.test(n);
+  return true;
+}
+
+export default function CatalogFilterScreen() {
+  const navigate  = useNavigate();
+  const location  = useLocation();
+  const { config, saveConfig } = useAppStore();
+
+  const { language = '', movieCategories = [], seriesCategories = [] } = location.state || {};
+
+  // Filtrer les catégories par langue sélectionnée (pré-sélection)
+  const filteredMovieCats  = movieCategories.filter((c) => matchesLanguage(c.category_name, language));
+  const filteredSeriesCats = seriesCategories.filter((c) => matchesLanguage(c.category_name, language));
+
+  // Si aucune catégorie ne correspond, afficher toutes
+  const displayMovieCats  = filteredMovieCats.length  > 0 ? filteredMovieCats  : movieCategories;
+  const displaySeriesCats = filteredSeriesCats.length > 0 ? filteredSeriesCats : seriesCategories;
+
+  const [activeTab, setActiveTab] = useState('movies');  // 'movies' | 'series'
+
+  // Sélection : par défaut toutes les catégories filtrées sont cochées
+  const [selectedMovieIds,  setSelectedMovieIds]  = useState(
+    () => new Set(displayMovieCats.map((c) => String(c.category_id)))
+  );
+  const [selectedSeriesIds, setSelectedSeriesIds] = useState(
+    () => new Set(displaySeriesCats.map((c) => String(c.category_id)))
+  );
+
+  // Focus : 0 = tab bar, 1..n = categories, last = OK button
+  // area: 'tabs' | 'cats' | 'ok'
+  const [focusArea,   setFocusArea]   = useState('cats');
+  const [focusedTab,  setFocusedTab]  = useState(0);      // 0=films 1=séries
+  const [focusedCat,  setFocusedCat]  = useState(0);
+  const [focusedCtrl, setFocusedCtrl] = useState(0);     // 0=selectAll 1=deselectAll 2=OK
+
+  const tabFilmsRef    = useRef(null);
+  const tabSeriesRef   = useRef(null);
+  const catRefs        = useRef([]);
+  const selectAllRef   = useRef(null);
+  const deselectAllRef = useRef(null);
+  const okRef          = useRef(null);
+
+  const currentCats = activeTab === 'movies' ? displayMovieCats : displaySeriesCats;
+  const currentSel  = activeTab === 'movies' ? selectedMovieIds  : selectedSeriesIds;
+  const setCurrentSel = activeTab === 'movies' ? setSelectedMovieIds : setSelectedSeriesIds;
+
+  // Focus initial : première catégorie
+  useEffect(() => {
+    setTimeout(() => {
+      catRefs.current[0]?.focus();
+      setFocusArea('cats');
+      setFocusedCat(0);
+    }, 100);
+  }, []);
+
+  // Quand on change d'onglet, recentrer sur la première cat
+  useEffect(() => {
+    if (focusArea === 'cats') {
+      setFocusedCat(0);
+      catRefs.current[0]?.focus();
+    }
+  }, [activeTab]);
+
+  const toggleCategory = useCallback((id) => {
+    const sid = String(id);
+    setCurrentSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(sid)) next.delete(sid);
+      else next.add(sid);
+      return next;
+    });
+  }, [setCurrentSel]);
+
+  const selectAll = useCallback(() => {
+    setCurrentSel(new Set(currentCats.map((c) => String(c.category_id))));
+  }, [currentCats, setCurrentSel]);
+
+  const deselectAll = useCallback(() => {
+    setCurrentSel(new Set());
+  }, [setCurrentSel]);
+
+  const handleOk = useCallback(() => {
+    // Valider : si aucune catégorie sélectionnée pour un type → on prend toutes
+    const movIds  = selectedMovieIds.size  > 0 ? [...selectedMovieIds]  : [];
+    const serIds  = selectedSeriesIds.size > 0 ? [...selectedSeriesIds] : [];
+    saveConfig({
+      ...config,
+      filterLanguage: language,
+      selectedMovieCategories:  movIds,
+      selectedSeriesCategories: serIds,
+    });
+    navigate('/');
+  }, [selectedMovieIds, selectedSeriesIds, config, language, saveConfig, navigate]);
+
+  // ── Navigation clavier ──────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (focusArea === 'tabs') {
+        if (e.keyCode === KEY.LEFT) {
+          e.preventDefault();
+          if (focusedTab > 0) { setFocusedTab(0); setActiveTab('movies'); tabFilmsRef.current?.focus(); }
+        } else if (e.keyCode === KEY.RIGHT) {
+          e.preventDefault();
+          if (focusedTab < 1) { setFocusedTab(1); setActiveTab('series'); tabSeriesRef.current?.focus(); }
+        } else if (e.keyCode === KEY.DOWN) {
+          e.preventDefault();
+          setFocusArea('cats');
+          setFocusedCat(0);
+          catRefs.current[0]?.focus();
+        } else if (e.keyCode === KEY.OK) {
+          const el = document.activeElement;
+          if (el && el.tagName === 'BUTTON') { e.preventDefault(); el.click(); }
+        }
+      } else if (focusArea === 'cats') {
+        if (e.keyCode === KEY.UP) {
+          e.preventDefault();
+          if (focusedCat > 0) {
+            const next = focusedCat - 1;
+            setFocusedCat(next);
+            catRefs.current[next]?.focus({ preventScroll: false });
+          } else {
+            setFocusArea('tabs');
+            setFocusedTab(activeTab === 'movies' ? 0 : 1);
+            (activeTab === 'movies' ? tabFilmsRef : tabSeriesRef).current?.focus();
+          }
+        } else if (e.keyCode === KEY.DOWN) {
+          e.preventDefault();
+          if (focusedCat < currentCats.length - 1) {
+            const next = focusedCat + 1;
+            setFocusedCat(next);
+            catRefs.current[next]?.focus({ preventScroll: false });
+          } else {
+            setFocusArea('ctrl');
+            setFocusedCtrl(0);
+            selectAllRef.current?.focus();
+          }
+        } else if (e.keyCode === KEY.OK) {
+          e.preventDefault();
+          const cat = currentCats[focusedCat];
+          if (cat) toggleCategory(cat.category_id);
+        }
+      } else if (focusArea === 'ctrl') {
+        if (e.keyCode === KEY.UP) {
+          e.preventDefault();
+          if (focusedCtrl > 0) {
+            const next = focusedCtrl - 1;
+            setFocusedCtrl(next);
+            [selectAllRef, deselectAllRef, okRef][next].current?.focus();
+          } else {
+            setFocusArea('cats');
+            const last = Math.max(0, currentCats.length - 1);
+            setFocusedCat(last);
+            catRefs.current[last]?.focus();
+          }
+        } else if (e.keyCode === KEY.DOWN) {
+          e.preventDefault();
+          const max = 2;
+          if (focusedCtrl < max) {
+            const next = focusedCtrl + 1;
+            setFocusedCtrl(next);
+            [selectAllRef, deselectAllRef, okRef][next].current?.focus();
+          }
+        } else if (e.keyCode === KEY.LEFT || e.keyCode === KEY.RIGHT) {
+          e.preventDefault();
+          // Naviguer entre selectAll / deselectAll / OK horizontalement
+          const refs = [selectAllRef, deselectAllRef, okRef];
+          const next = e.keyCode === KEY.RIGHT
+            ? Math.min(2, focusedCtrl + 1)
+            : Math.max(0, focusedCtrl - 1);
+          setFocusedCtrl(next);
+          refs[next].current?.focus();
+        } else if (e.keyCode === KEY.OK) {
+          const el = document.activeElement;
+          if (el && el.tagName === 'BUTTON') { e.preventDefault(); el.click(); }
+        }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [focusArea, focusedTab, focusedCat, focusedCtrl, activeTab, currentCats, toggleCategory]);
+
+  const fc = (area, idx) => focusArea === area && (idx === undefined || focusedCtrl === idx) ? 'focused' : '';
+
+  return (
+    <div className="catalog-filter-screen">
+      <div className="catalog-filter-header">
+        <h1 className="catalog-filter-title">Sélection des catégories</h1>
+        <p className="catalog-filter-subtitle">
+          Langue : <strong>{language || 'Tout'}</strong> — Cochez les catégories à inclure dans votre catalogue
+        </p>
+      </div>
+
+      {/* Tab bar */}
+      <div className="catalog-filter-tabs">
+        <button
+          ref={tabFilmsRef}
+          className={`catalog-filter-tab ${activeTab === 'movies' ? 'active' : ''} ${focusArea === 'tabs' && focusedTab === 0 ? 'focused' : ''}`}
+          tabIndex={0}
+          onFocus={() => { setFocusArea('tabs'); setFocusedTab(0); }}
+          onClick={() => { setActiveTab('movies'); setFocusArea('cats'); setTimeout(() => catRefs.current[0]?.focus(), 50); }}
+        >
+          Films ({selectedMovieIds.size} / {displayMovieCats.length})
+        </button>
+        <button
+          ref={tabSeriesRef}
+          className={`catalog-filter-tab ${activeTab === 'series' ? 'active' : ''} ${focusArea === 'tabs' && focusedTab === 1 ? 'focused' : ''}`}
+          tabIndex={0}
+          onFocus={() => { setFocusArea('tabs'); setFocusedTab(1); }}
+          onClick={() => { setActiveTab('series'); setFocusArea('cats'); setTimeout(() => catRefs.current[0]?.focus(), 50); }}
+        >
+          Séries ({selectedSeriesIds.size} / {displaySeriesCats.length})
+        </button>
+      </div>
+
+      {/* Liste des catégories */}
+      <div className="catalog-filter-list">
+        {currentCats.map((cat, i) => {
+          const id  = String(cat.category_id);
+          const sel = currentSel.has(id);
+          return (
+            <div
+              key={id}
+              ref={(el) => { catRefs.current[i] = el; }}
+              className={`catalog-filter-item ${sel ? 'selected' : ''} ${focusArea === 'cats' && focusedCat === i ? 'focused' : ''}`}
+              tabIndex={0}
+              role="checkbox"
+              aria-checked={sel}
+              onFocus={() => { setFocusArea('cats'); setFocusedCat(i); }}
+              onClick={() => toggleCategory(id)}
+            >
+              <span className="catalog-filter-item__check">{sel ? '☑' : '☐'}</span>
+              <span className="catalog-filter-item__name">{cat.category_name}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Boutons contrôle */}
+      <div className="catalog-filter-controls">
+        <button
+          ref={selectAllRef}
+          className={`catalog-filter-ctrl-btn ${fc('ctrl', 0)}`}
+          tabIndex={0}
+          onFocus={() => { setFocusArea('ctrl'); setFocusedCtrl(0); }}
+          onClick={selectAll}
+        >
+          Tout sélectionner
+        </button>
+        <button
+          ref={deselectAllRef}
+          className={`catalog-filter-ctrl-btn ${fc('ctrl', 1)}`}
+          tabIndex={0}
+          onFocus={() => { setFocusArea('ctrl'); setFocusedCtrl(1); }}
+          onClick={deselectAll}
+        >
+          Tout désélectionner
+        </button>
+        <button
+          ref={okRef}
+          className={`catalog-filter-ctrl-btn catalog-filter-ctrl-btn--ok ${fc('ctrl', 2)}`}
+          tabIndex={0}
+          onFocus={() => { setFocusArea('ctrl'); setFocusedCtrl(2); }}
+          onClick={handleOk}
+        >
+          OK — Valider
+        </button>
+      </div>
+    </div>
+  );
+}

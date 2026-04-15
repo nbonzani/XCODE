@@ -119,8 +119,10 @@ export default function HomeScreen() {
       setTimeout(focusFirstCard, 100);
       return;
     }
-    loadCatalogStore(loadCatalogFast, config.frenchOnly).then(async () => {
-      loadCatalogStore(loadCatalog, config.frenchOnly).then(async () => {
+    const selMovCats = config.selectedMovieCategories  || [];
+    const selSerCats = config.selectedSeriesCategories || [];
+    loadCatalogStore(loadCatalogFast, config.frenchOnly, selMovCats, selSerCats).then(async () => {
+      loadCatalogStore(loadCatalog, config.frenchOnly, selMovCats, selSerCats).then(async () => {
         const shouldSync = await needsSync(30);
         const isEmpty    = useCatalogStore.getState().allMovies.length === 0;
         if (shouldSync || isEmpty) sync();
@@ -140,24 +142,27 @@ export default function HomeScreen() {
     : rawCategories;
 
   // ── Filtres ────────────────────────────────────────────────────────────
+  const selMovCats = config.selectedMovieCategories  || [];
+  const selSerCats = config.selectedSeriesCategories || [];
+
   const handleSearchChange = useCallback(
-    (q) => setSearchQuery(q, activeTab, config.frenchOnly),
-    [activeTab, config.frenchOnly, setSearchQuery]
+    (q) => setSearchQuery(q, activeTab, config.frenchOnly, selMovCats, selSerCats),
+    [activeTab, config.frenchOnly, setSearchQuery, selMovCats, selSerCats]
   );
 
   // Sélection catégorie depuis la sidebar → ferme la sidebar
   const handleCategoryChange = useCallback((cat) => {
-    setCategory(cat, activeTab, config.frenchOnly);
+    setCategory(cat, activeTab, config.frenchOnly, selMovCats, selSerCats);
     closeSidebar();
     setTimeout(focusFirstCard, 80);
-  }, [activeTab, config.frenchOnly, setCategory, closeSidebar]);
+  }, [activeTab, config.frenchOnly, setCategory, closeSidebar, selMovCats, selSerCats]);
 
   const handleTabChange = useCallback((tab) => {
     setActiveTab(tab);
-    setCategory('', tab, config.frenchOnly);
-    setSearchQuery('', tab, config.frenchOnly);
+    setCategory('', tab, config.frenchOnly, selMovCats, selSerCats);
+    setSearchQuery('', tab, config.frenchOnly, selMovCats, selSerCats);
     closeSidebar();
-  }, [setActiveTab, setCategory, setSearchQuery, config.frenchOnly, closeSidebar]);
+  }, [setActiveTab, setCategory, setSearchQuery, config.frenchOnly, closeSidebar, selMovCats, selSerCats]);
 
   // ── Fonctions de focus ─────────────────────────────────────────────────
   const focusFirstCard = useCallback(() => {

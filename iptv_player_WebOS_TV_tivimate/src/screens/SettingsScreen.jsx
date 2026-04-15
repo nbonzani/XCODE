@@ -145,10 +145,15 @@ export default function SettingsScreen() {
   const [password,   setPassword]   = useState(config.password   || '');
   const [frenchOnly, setFrenchOnly] = useState(config.frenchOnly !== undefined ? config.frenchOnly : true);
 
-  const [connectionStatus, setConnectionStatus] = useState(null);
-  const [validationError,  setValidationError]  = useState('');
-  const [isTesting,        setIsTesting]        = useState(false);
-  const [focusedIdx,       setFocusedIdx]       = useState(0);
+  const [connectionStatus,   setConnectionStatus]   = useState(null);
+  const [validationError,    setValidationError]     = useState('');
+  const [isTesting,          setIsTesting]           = useState(false);
+  const [focusedIdx,         setFocusedIdx]          = useState(0);
+  const [showLangPicker,     setShowLangPicker]      = useState(false);
+  const [langFocusedIdx,     setLangFocusedIdx]      = useState(0);
+  const [isLoadingCats,      setIsLoadingCats]       = useState(false);
+  const [inLangArea,         setInLangArea]          = useState(false);
+  const langButtonRefs = useRef([]);
 
   // ── Import M3U ──────────────────────────────────────────────────────────
   const [m3uStatus, setM3uStatus]     = useState(null);  // { type, message, files? }
@@ -186,12 +191,49 @@ export default function SettingsScreen() {
       // Ignorer si un input est actif (clavier virtuel ouvert)
       if (document.activeElement?.tagName === 'INPUT') return;
 
+      // Zone langue : navigation horizontale parmi les 5 boutons
+      if (inLangArea) {
+        if (e.keyCode === KEY.LEFT) {
+          e.preventDefault();
+          const next = Math.max(0, langFocusedIdx - 1);
+          setLangFocusedIdx(next);
+          langButtonRefs.current[next]?.focus();
+        } else if (e.keyCode === KEY.RIGHT) {
+          e.preventDefault();
+          const next = Math.min(4, langFocusedIdx + 1);
+          setLangFocusedIdx(next);
+          langButtonRefs.current[next]?.focus();
+        } else if (e.keyCode === KEY.UP) {
+          e.preventDefault();
+          setInLangArea(false);
+          applyFocus(4);
+        } else if (e.keyCode === KEY.DOWN) {
+          e.preventDefault();
+          setInLangArea(false);
+          applyFocus(5);
+        } else if (e.keyCode === KEY.OK) {
+          const el = document.activeElement;
+          if (el && el.tagName === 'BUTTON') { e.preventDefault(); el.click(); }
+        } else if (isBackKey(e.keyCode) && isConfigured) {
+          e.preventDefault();
+          navigate('/');
+        }
+        return;
+      }
+
       if (isBackKey(e.keyCode) && isConfigured) {
         e.preventDefault();
         navigate('/');
       } else if (e.keyCode === KEY.DOWN) {
         e.preventDefault();
-        applyFocus(focusedIdx + 1);
+        if (showLangPicker && focusedIdx === 4) {
+          // Descendre vers zone langue
+          setInLangArea(true);
+          setLangFocusedIdx(0);
+          langButtonRefs.current[0]?.focus();
+        } else {
+          applyFocus(focusedIdx + 1);
+        }
       } else if (e.keyCode === KEY.UP) {
         e.preventDefault();
         applyFocus(focusedIdx - 1);
@@ -217,7 +259,7 @@ export default function SettingsScreen() {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [isConfigured, navigate, focusedIdx, applyFocus]);
+  }, [isConfigured, navigate, focusedIdx, applyFocus, inLangArea, langFocusedIdx, showLangPicker]);
 
   const normalizeUrl = (url) => {
     const t = url.trim();
@@ -236,6 +278,7 @@ export default function SettingsScreen() {
     if (!validate() || isTesting) return;
     setIsTesting(true);
     setConnectionStatus({ type: 'loading', message: 'Test de connexion en cours…' });
+    let success = false;
     try {
       const client = new XtreamClient(normalizeUrl(serverUrl), '', username.trim(), password.trim());
       const data   = await client.authenticate();
@@ -248,23 +291,73 @@ export default function SettingsScreen() {
         type: 'success', message: 'Connexion réussie !',
         details: [`Compte : ${u.username || 'N/A'}`, `Statut : ${u.status || 'N/A'}`, `Expire le : ${expDate}`, `Connexions : ${u.active_cons || 0} / ${u.max_connections || 'N/A'}`],
       });
+      success = true;
+      setShowLangPicker(true);
+      setLangFocusedIdx(0);
+      setTimeout(() => {
+        setInLangArea(true);
+        langButtonRefs.current[0]?.focus();
+      }, 200);
     } catch (err) {
       setConnectionStatus({ type: 'error', message: `Échec : ${err.message}` });
+      setShowLangPicker(false);
     } finally {
       setIsTesting(false);
-      setTimeout(() => applyFocus(4), 200);
+      if (!success) setTimeout(() => applyFocus(4), 200);
     }
   }, [serverUrl, username, password, validate, isTesting, applyFocus]);
 
   const handleSave = useCallback(() => {
     if (!validate()) return;
     try {
-      saveConfig({ serverUrl: normalizeUrl(serverUrl), port: '', username: username.trim(), password: password.trim(), frenchOnly });
+      const existing = useAppStore.getState().config;
+      saveConfig({
+        serverUrl: normalizeUrl(serverUrl), port: '', username: username.trim(), password: password.trim(), frenchOnly,
+        filterLanguage: existing.filterLanguage || '',
+        selectedMovieCategories: existing.selectedMovieCategories || [],
+        selectedSeriesCategories: existing.selectedSeriesCategories || [],
+      });
       navigate('/');
     } catch {
       setValidationError('Erreur lors de la sauvegarde. Réessayez.');
     }
   }, [serverUrl, username, password, frenchOnly, validate, saveConfig, navigate]);
+
+  const handleLanguageSelect = useCallback(async (lang) => {
+    if (isLoadingCats) return;
+    const baseConfig = {
+      serverUrl: normalizeUrl(serverUrl), port: '', username: username.trim(),
+      password: password.trim(), frenchOnly,
+    };
+
+    if (lang === '') {
+      // "Tout" : pas de filtre catégorie
+      try {
+        saveConfig({ ...baseConfig, filterLanguage: '', selectedMovieCategories: [], selectedSeriesCategories: [] });
+        navigate('/');
+      } catch {
+        setValidationError('Erreur lors de la sauvegarde.');
+      }
+      return;
+    }
+
+    // Langue sélectionnée → charger les catégories et ouvrir l'écran de filtre
+    setIsLoadingCats(true);
+    try {
+      const client = new XtreamClient(normalizeUrl(serverUrl), '', username.trim(), password.trim());
+      const [movieCats, seriesCats] = await Promise.all([
+        client.getVodCategories(),
+        client.getSeriesCategories(),
+      ]);
+      // Pré-sauvegarder la config sans sélection de catégories (sera mis à jour dans CatalogFilterScreen)
+      saveConfig({ ...baseConfig, filterLanguage: lang, selectedMovieCategories: [], selectedSeriesCategories: [] });
+      navigate('/catalog-filter', { state: { language: lang, movieCategories: movieCats, seriesCategories: seriesCats } });
+    } catch (err) {
+      setValidationError(`Erreur chargement catégories : ${err.message}`);
+    } finally {
+      setIsLoadingCats(false);
+    }
+  }, [serverUrl, username, password, frenchOnly, isLoadingCats, saveConfig, navigate]);
 
   // ── Import M3U : scan USB ──────────────────────────────────────────────
   const handleScanUsb = useCallback(async () => {
@@ -379,6 +472,38 @@ export default function SettingsScreen() {
 
           {validationError && <p className="settings-error">⚠ {validationError}</p>}
           <ConnectionStatus status={connectionStatus} />
+
+          {showLangPicker && (
+            <div className="settings-lang-picker">
+              <p className="settings-lang-picker__title">
+                {isLoadingCats ? 'Chargement des catégories…' : 'Choisissez une langue pour filtrer le catalogue :'}
+              </p>
+              {isLoadingCats ? (
+                <div className="spinner" style={{ width: 40, height: 40, margin: '0 auto' }} />
+              ) : (
+                <div className="settings-lang-picker__buttons">
+                  {[
+                    { lang: 'FR', label: 'Français' },
+                    { lang: 'IT', label: 'Italien' },
+                    { lang: 'EN', label: 'Anglais' },
+                    { lang: 'DE', label: 'Allemand' },
+                    { lang: '',   label: 'Tout' },
+                  ].map(({ lang, label }, i) => (
+                    <button
+                      key={lang || 'all'}
+                      ref={(el) => { langButtonRefs.current[i] = el; }}
+                      className={`settings-lang-btn ${inLangArea && langFocusedIdx === i ? 'focused' : ''}`}
+                      tabIndex={0}
+                      onFocus={() => { setInLangArea(true); setLangFocusedIdx(i); }}
+                      onClick={() => handleLanguageSelect(lang)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="settings-actions">
             <button

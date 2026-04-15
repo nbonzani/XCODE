@@ -28,10 +28,11 @@ import React, { useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 // Imports statiques — obligatoires sur webOS (file:// bloque les imports dynamiques)
-import HomeScreen        from './screens/HomeScreen.jsx';
-import SettingsScreen    from './screens/SettingsScreen.jsx';
-import SeriesDetailScreen from './screens/SeriesDetailScreen.jsx';
-import PlayerScreen      from './screens/PlayerScreen.jsx';
+import HomeScreen           from './screens/HomeScreen.jsx';
+import SettingsScreen       from './screens/SettingsScreen.jsx';
+import SeriesDetailScreen   from './screens/SeriesDetailScreen.jsx';
+import PlayerScreen         from './screens/PlayerScreen.jsx';
+import CatalogFilterScreen  from './screens/CatalogFilterScreen.jsx';
 
 // Import du store Zustand pour vérifier si l'application est configurée
 // et rediriger vers SettingsScreen au premier lancement.
@@ -138,6 +139,7 @@ export default function App() {
             (premier lancement, reconfiguration).
           */}
           <Route path="/settings" element={<SettingsScreen />} />
+          <Route path="/catalog-filter" element={<CatalogFilterScreen />} />
 
           {/*
             Route détail série : :id est l'identifiant numérique de la série

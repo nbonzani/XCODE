@@ -21,8 +21,14 @@ import { create } from 'zustand';
  * @param {Array}  frenchCategoryIds - IDs des catégories françaises (pré-calculé)
  * @returns {Array}
  */
-function applyFilters(items, query, categoryId, frenchOnly, frenchCategoryIds) {
+function applyFilters(items, query, categoryId, frenchOnly, frenchCategoryIds, selectedCategoryIds) {
   let result = items;
+
+  // Filtre catalogue (catégories sélectionnées par l'utilisateur dans le filtre)
+  if (selectedCategoryIds && selectedCategoryIds.length > 0) {
+    const selSet = new Set(selectedCategoryIds.map(String));
+    result = result.filter((item) => selSet.has(String(item.category_id)));
+  }
 
   // Filtre texte (insensible à la casse, insensible aux accents)
   if (query && query.trim()) {
@@ -33,7 +39,7 @@ function applyFilters(items, query, categoryId, frenchOnly, frenchCategoryIds) {
     });
   }
 
-  // Filtre catégorie
+  // Filtre catégorie (sidebar)
   if (categoryId && categoryId !== '') {
     result = result.filter((item) => String(item.category_id) === String(categoryId));
   }
@@ -77,10 +83,12 @@ export const useCatalogStore = create((set, get) => ({
   /**
    * Charge le catalogue complet depuis IndexedDB.
    * Appelé au montage de HomeScreen et après une synchronisation réussie.
-   * @param {Function} loadFromCache - Fonction async de cacheService.js
-   * @param {boolean}  frenchOnly    - Filtre FR de la config
+   * @param {Function} loadFromCache              - Fonction async de cacheService.js
+   * @param {boolean}  frenchOnly                 - Filtre FR de la config
+   * @param {string[]} selectedMovieCategories    - IDs catégories films sélectionnées ([] = toutes)
+   * @param {string[]} selectedSeriesCategories   - IDs catégories séries sélectionnées ([] = toutes)
    */
-  loadCatalog: async (loadFromCache, frenchOnly) => {
+  loadCatalog: async (loadFromCache, frenchOnly, selectedMovieCategories, selectedSeriesCategories) => {
     set({ isLoading: true, loadError: null });
     try {
       const { movies, series, movieCategories, seriesCategories } = await loadFromCache();
@@ -106,10 +114,12 @@ export const useCatalogStore = create((set, get) => ({
       // Calcul initial des données filtrées
       const { searchQuery, selectedCategoryId } = get();
       const filteredMovies = applyFilters(
-        movies, searchQuery, selectedCategoryId, frenchOnly, frenchMovieCategoryIds
+        movies, searchQuery, selectedCategoryId, frenchOnly, frenchMovieCategoryIds,
+        selectedMovieCategories || []
       );
       const filteredSeries = applyFilters(
-        series, searchQuery, selectedCategoryId, frenchOnly, frenchSeriesCategoryIds
+        series, searchQuery, selectedCategoryId, frenchOnly, frenchSeriesCategoryIds,
+        selectedSeriesCategories || []
       );
 
       set({
@@ -133,21 +143,23 @@ export const useCatalogStore = create((set, get) => ({
 
   /**
    * Met à jour le texte de recherche et recalcule les résultats filtrés.
-   * @param {string}  query      - Texte saisi dans SearchInput
-   * @param {string}  activeTab  - 'movies' ou 'series'
-   * @param {boolean} frenchOnly
+   * @param {string}   query                    - Texte saisi dans SearchInput
+   * @param {string}   activeTab                - 'movies' ou 'series'
+   * @param {boolean}  frenchOnly
+   * @param {string[]} selectedMovieCategories  - IDs catégories films ([] = toutes)
+   * @param {string[]} selectedSeriesCategories - IDs catégories séries ([] = toutes)
    */
-  setSearchQuery: (query, activeTab, frenchOnly) => {
+  setSearchQuery: (query, activeTab, frenchOnly, selectedMovieCategories, selectedSeriesCategories) => {
     const state = get();
     const { selectedCategoryId, allMovies, allSeries,
             frenchMovieCategoryIds, frenchSeriesCategoryIds } = state;
 
     const filteredMovies = activeTab === 'movies'
-      ? applyFilters(allMovies, query, selectedCategoryId, frenchOnly, frenchMovieCategoryIds)
+      ? applyFilters(allMovies, query, selectedCategoryId, frenchOnly, frenchMovieCategoryIds, selectedMovieCategories || [])
       : state.filteredMovies;
 
     const filteredSeries = activeTab === 'series'
-      ? applyFilters(allSeries, query, selectedCategoryId, frenchOnly, frenchSeriesCategoryIds)
+      ? applyFilters(allSeries, query, selectedCategoryId, frenchOnly, frenchSeriesCategoryIds, selectedSeriesCategories || [])
       : state.filteredSeries;
 
     set({ searchQuery: query, filteredMovies, filteredSeries });
@@ -155,21 +167,23 @@ export const useCatalogStore = create((set, get) => ({
 
   /**
    * Met à jour la catégorie sélectionnée et recalcule les résultats.
-   * @param {string}  categoryId - ID de catégorie ("" = toutes)
-   * @param {string}  activeTab
-   * @param {boolean} frenchOnly
+   * @param {string}   categoryId               - ID de catégorie ("" = toutes)
+   * @param {string}   activeTab
+   * @param {boolean}  frenchOnly
+   * @param {string[]} selectedMovieCategories  - IDs catégories films ([] = toutes)
+   * @param {string[]} selectedSeriesCategories - IDs catégories séries ([] = toutes)
    */
-  setCategory: (categoryId, activeTab, frenchOnly) => {
+  setCategory: (categoryId, activeTab, frenchOnly, selectedMovieCategories, selectedSeriesCategories) => {
     const state = get();
     const { searchQuery, allMovies, allSeries,
             frenchMovieCategoryIds, frenchSeriesCategoryIds } = state;
 
     const filteredMovies = activeTab === 'movies'
-      ? applyFilters(allMovies, searchQuery, categoryId, frenchOnly, frenchMovieCategoryIds)
+      ? applyFilters(allMovies, searchQuery, categoryId, frenchOnly, frenchMovieCategoryIds, selectedMovieCategories || [])
       : state.filteredMovies;
 
     const filteredSeries = activeTab === 'series'
-      ? applyFilters(allSeries, searchQuery, categoryId, frenchOnly, frenchSeriesCategoryIds)
+      ? applyFilters(allSeries, searchQuery, categoryId, frenchOnly, frenchSeriesCategoryIds, selectedSeriesCategories || [])
       : state.filteredSeries;
 
     set({ selectedCategoryId: categoryId, filteredMovies, filteredSeries });
