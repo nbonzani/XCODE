@@ -137,27 +137,44 @@ export default function CatalogFilterScreen() {
           if (el && el.tagName === 'BUTTON') { e.preventDefault(); el.click(); }
         }
       } else if (focusArea === 'cats') {
+        const COLS = 3;
         if (e.keyCode === KEY.UP) {
           e.preventDefault();
-          if (focusedCat > 0) {
-            const next = focusedCat - 1;
+          const next = focusedCat - COLS;
+          if (next >= 0) {
             setFocusedCat(next);
             catRefs.current[next]?.focus({ preventScroll: false });
           } else {
+            // Première ligne → remonter aux onglets
             setFocusArea('tabs');
             setFocusedTab(activeTab === 'movies' ? 0 : 1);
             (activeTab === 'movies' ? tabFilmsRef : tabSeriesRef).current?.focus();
           }
         } else if (e.keyCode === KEY.DOWN) {
           e.preventDefault();
-          if (focusedCat < currentCats.length - 1) {
-            const next = focusedCat + 1;
+          const next = focusedCat + COLS;
+          if (next < currentCats.length) {
             setFocusedCat(next);
             catRefs.current[next]?.focus({ preventScroll: false });
           } else {
+            // Dernière ligne → descendre aux boutons
             setFocusArea('ctrl');
             setFocusedCtrl(0);
             selectAllRef.current?.focus();
+          }
+        } else if (e.keyCode === KEY.LEFT) {
+          e.preventDefault();
+          if (focusedCat % COLS > 0) {
+            const next = focusedCat - 1;
+            setFocusedCat(next);
+            catRefs.current[next]?.focus({ preventScroll: false });
+          }
+        } else if (e.keyCode === KEY.RIGHT) {
+          e.preventDefault();
+          if (focusedCat % COLS < COLS - 1 && focusedCat + 1 < currentCats.length) {
+            const next = focusedCat + 1;
+            setFocusedCat(next);
+            catRefs.current[next]?.focus({ preventScroll: false });
           }
         } else if (e.keyCode === KEY.OK) {
           e.preventDefault();
