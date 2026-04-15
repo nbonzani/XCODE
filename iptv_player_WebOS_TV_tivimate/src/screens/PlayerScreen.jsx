@@ -318,12 +318,12 @@ export default function PlayerScreen() {
   }, [hasPlaylist, hasAudio, hasSubs]);
 
   // ── Timer contrôles ──────────────────────────────────────────────────────
-  var showControlsTemporarily = useCallback(function() {
+  var showControlsTemporarily = useCallback(function(timeout) {
     setShowControls(true);
     clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(function() {
       setBtnMode(function(bm) { if (!bm) setShowControls(false); return bm; });
-    }, CONTROLS_TIMEOUT);
+    }, timeout !== undefined ? timeout : CONTROLS_TIMEOUT);
   }, []);
 
   // ── Mode BOUTONS ─────────────────────────────────────────────────────────
@@ -657,7 +657,7 @@ export default function PlayerScreen() {
         ref={videoRef}
         className="player-video"
         onPlay={function()    { setIsPlaying(true);  }}
-        onPlaying={function() { setIsPlaying(true); showControlsTemporarily(); }}
+        onPlaying={function() { setIsPlaying(true); showControlsTemporarily(2000); }}
         onPause={function()   { setIsPlaying(false); }}
         onTimeUpdate={function() {
           var v = videoRef.current;
