@@ -19,6 +19,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppStore }    from '../store/appStore.js';
+import { useWakeLock }    from '../hooks/useWakeLock.js';
 import { usePlayerStore } from '../store/playerStore.js';
 import { createClientFromConfig } from '../services/xtreamApi.js';
 import { markEpisodeWatched, getWatchedEpisodesSet, setLastWatchedSeries } from '../services/watchHistoryService.js';
@@ -146,6 +147,7 @@ export default function SeriesDetailScreen() {
   const { id }   = useParams();
   const navigate = useNavigate();
   const { config }                   = useAppStore();
+  useWakeLock();
   const { playPlaylist } = usePlayerStore();
 
   const [seriesInfo,   setSeriesInfo]   = useState(null);

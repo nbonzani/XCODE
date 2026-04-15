@@ -10,6 +10,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../store/appStore.js';
+import { useWakeLock } from '../hooks/useWakeLock.js';
 import './SyncScreen.css';
 
 var BLOB_W   = 680;   // largeur max du bloc (px)
@@ -55,61 +56,7 @@ function useBouncingPos() {
   return pos;
 }
 
-// ── Hook : empêcher la mise en veille ────────────────────────────────────────
-
-function useWakeLock() {
-  useEffect(function() {
-    var cleanups = [];
-
-    // ── Méthode 1 : Luna subscribe (webOS TV) ──────────────────────────────
-    // S'abonner à un service Luna maintient l'app "active" côté système.
-    // On écoute aussi l'état écran pour le réveiller si nécessaire.
-    try {
-      if (typeof webOS !== 'undefined' && webOS.service) {
-        var req = webOS.service.request('luna://com.webos.service.tvpower/power', {
-          method: 'getPowerState',
-          subscribe: true,
-          onSuccess: function(res) {
-            // Si l'écran est en train de s'éteindre, on le réveille
-            if (res && res.state && res.state.toLowerCase().indexOf('sleep') !== -1) {
-              webOS.service.request('luna://com.webos.service.tvpower/power', {
-                method: 'wakeUpScreen',
-                parameters: {},
-                onSuccess: function() {},
-                onFailure: function() {},
-              });
-            }
-          },
-          onFailure: function() {},
-        });
-        cleanups.push(function() { if (req && req.cancel) req.cancel(); });
-      }
-    } catch (e) { /* non webOS */ }
-
-    // ── Méthode 2 : AudioContext silencieux (fallback Chromium) ───────────
-    // Un oscillateur à gain 0 maintient l'AudioContext actif et empêche
-    // le navigateur/système de considérer la page comme inactive.
-    try {
-      var AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) {
-        var ctx  = new AudioCtx();
-        var osc  = ctx.createOscillator();
-        var gain = ctx.createGain();
-        gain.gain.value = 0; // complètement silencieux
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        cleanups.push(function() {
-          try { osc.stop(); ctx.close(); } catch (e) {}
-        });
-      }
-    } catch (e) { /* AudioContext non disponible */ }
-
-    return function() {
-      cleanups.forEach(function(fn) { fn(); });
-    };
-  }, []);
-}
+// useWakeLock importé depuis src/hooks/useWakeLock.js
 
 // ── Composant ────────────────────────────────────────────────────────────────
 

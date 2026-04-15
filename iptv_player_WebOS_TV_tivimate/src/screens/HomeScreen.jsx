@@ -14,6 +14,7 @@ import { useAppStore }     from '../store/appStore.js';
 import { useCatalogStore } from '../store/catalogStore.js';
 import { loadCatalog, loadCatalogFast, needsSync } from '../services/cacheService.js';
 import { useSync }         from '../hooks/useSync.js';
+import { useWakeLock }     from '../hooks/useWakeLock.js';
 import { usePlayerStore }  from '../store/playerStore.js';
 import { createClientFromConfig } from '../services/xtreamApi.js';
 import { getLastWatchedSeries } from '../services/watchHistoryService.js';
@@ -45,6 +46,7 @@ export default function HomeScreen() {
   } = useCatalogStore();
 
   const { sync, syncFresh, isSyncing } = useSync();
+  useWakeLock();
   const { playSingle } = usePlayerStore();
 
   const sidebarRef = useRef(null);
