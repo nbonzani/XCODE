@@ -129,13 +129,14 @@ export default function HomeScreen() {
       return;
     }
 
+    // alreadyLoaded : sert uniquement à éviter de déclencher un resync
+    // à chaque retour depuis la fiche série. On relit toujours le cache
+    // (lecture IndexedDB locale rapide) pour appliquer la config courante.
     const alreadyLoaded = useCatalogStore.getState().allMovies.length > 0;
-    if (alreadyLoaded) {
-      setTimeout(focusFirstCard, 100);
-      return;
-    }
+
     loadCatalogStore(loadCatalogFast, config.frenchOnly, selMovCats, selSerCats).then(async () => {
       loadCatalogStore(loadCatalog, config.frenchOnly, selMovCats, selSerCats).then(async () => {
+        if (alreadyLoaded) return; // retour navigation normale → pas de resync
         const shouldSync = await needsSync(30);
         const isEmpty    = useCatalogStore.getState().allMovies.length === 0;
         if (shouldSync || isEmpty) sync();
