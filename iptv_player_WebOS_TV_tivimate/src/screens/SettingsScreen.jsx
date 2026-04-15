@@ -356,7 +356,7 @@ export default function SettingsScreen() {
     } finally {
       setIsLoadingCats(false);
     }
-  }, [serverUrl, username, password, frenchOnly, isLoadingCats, saveConfig, navigate]);
+  }, [serverUrl, username, password, isLoadingCats, saveConfig, navigate]);
 
   // ── Import M3U : scan USB ──────────────────────────────────────────────
   const handleScanUsb = useCallback(async () => {
