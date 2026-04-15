@@ -338,8 +338,9 @@ export default function PlayerScreen() {
 
   var exitBtnMode = useCallback(function() {
     setBtnMode(false);
-    showControlsTemporarily();
-  }, [showControlsTemporarily]);
+    clearTimeout(hideTimerRef.current);
+    setShowControls(false);
+  }, []);
 
   useEffect(function() {
     if (!btnMode) return;
@@ -487,7 +488,7 @@ export default function PlayerScreen() {
   useEffect(function() {
     if (!streamUrl) { navigate(-1); return; }
     loadStream(streamUrl, startTime);
-    showControlsTemporarily();
+    setShowControls(true); // affiche les contrôles sans démarrer le timer — le timer part sur onPlaying
     return function() { clearTimeout(hideTimerRef.current); if (hlsRef.current) hlsRef.current.destroy(); };
   }, [streamUrl]);
 
@@ -655,8 +656,9 @@ export default function PlayerScreen() {
       <video
         ref={videoRef}
         className="player-video"
-        onPlay={function()  { setIsPlaying(true);  }}
-        onPause={function() { setIsPlaying(false); }}
+        onPlay={function()    { setIsPlaying(true);  }}
+        onPlaying={function() { setIsPlaying(true); showControlsTemporarily(); }}
+        onPause={function()   { setIsPlaying(false); }}
         onTimeUpdate={function() {
           var v = videoRef.current;
           if (!v) return;

@@ -83,6 +83,11 @@ const Sidebar = React.forwardRef(function Sidebar(
       setFocusedTabIdx(target);
       setTimeout(() => tabRefs.current[target]?.focus(), 0);
     },
+    focusToutesCategory: () => {
+      setFocusArea('cats');
+      setFocusedCatIdx(0);
+      setTimeout(() => catRefs.current[0]?.focus(), 0);
+    },
     focusSettings: () => {
       setFocusArea('settings');
       setTimeout(() => settingsRef.current?.focus(), 0);

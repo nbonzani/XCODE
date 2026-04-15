@@ -9,12 +9,12 @@
 import React, { useCallback } from 'react';
 import PosterImage from './PosterImage.jsx';
 import { KEY } from '../../constants/keyCodes.js';
-import { isFavorite } from '../../services/favoritesService.js';
 
 const ContentCard = React.memo(function ContentCard({
   item,
   type,
   isFocused,
+  isFav,
   onSelect,
   tabIndex,
   cardRef,
@@ -25,7 +25,7 @@ const ContentCard = React.memo(function ContentCard({
   const rating   = item.rating ? parseFloat(item.rating) : null;
   // Pour le type "mixed" (favoris), détecter le vrai type
   const effectiveType = type === 'mixed' ? (item.series_id && !item.stream_id ? 'series' : 'movie') : type;
-  const showFavBadge = isFavorite(itemId, effectiveType);
+  const showFavBadge = !!isFav;
 
   const handleKeyDown = useCallback((e) => {
     if (e.keyCode === KEY.OK) { e.preventDefault(); onSelect(item, effectiveType); }

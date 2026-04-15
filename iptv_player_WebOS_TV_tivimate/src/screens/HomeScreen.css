@@ -73,6 +73,7 @@
 
 .toolbar__search-btn:focus {
   outline: none;
+  box-shadow: none;
   color: var(--color-text-primary);
 }
 
@@ -85,6 +86,12 @@
   font-size: var(--font-size-sm);
   padding: 0;
   outline: none;
+  box-shadow: none;
+}
+
+.toolbar__search-input:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 .toolbar__search-input::placeholder {
@@ -106,8 +113,8 @@
 }
 
 .toolbar__btn:focus {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent);
   transform: scale(1.04);
 }
 
@@ -126,7 +133,7 @@
 
 .toolbar__btn--clear:focus {
   border-color: var(--color-error);
-  outline-color: var(--color-error);
+  box-shadow: 0 0 0 2px var(--color-error);
   color: var(--color-error);
 }
 
@@ -174,8 +181,8 @@
 .tab-item:focus {
   color: #fff;
   background-color: rgba(74, 158, 255, 0.08);
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--color-accent);
 }
 
 /* ── Bandeau de reprise série ────────────────────────────────────────────── */
@@ -192,8 +199,8 @@
 }
 
 .home-screen__resume:focus {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--color-accent);
   background: rgba(74,158,255,0.18);
 }
 
@@ -472,8 +479,8 @@
 
 .content-sort__btn--focused,
 .content-sort__btn:focus {
-  outline: 2px solid rgba(74, 158, 255, 0.90);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.90);
   color: rgba(74, 158, 255, 0.90);
 }
 
@@ -543,7 +550,7 @@
   position: absolute;
   top: 6px;
   right: 6px;
-  font-size: 18px;
+  font-size: 108px;
   color: #f1c40f;
   text-shadow: 0 1px 3px rgba(0,0,0,0.8);
   pointer-events: none;

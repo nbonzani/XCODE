@@ -207,15 +207,15 @@
 }
 
 .player-btn:focus {
-  outline: 2px solid rgba(74, 158, 255, 0.90);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.90);
   background-color: rgba(74, 158, 255, 0.10);
 }
 
 /* Bouton sélectionné en mode BOUTONS (navigation ←→) */
 .player-btn--focused {
-  outline: 2px solid rgba(74, 158, 255, 0.90) !important;
-  outline-offset: 2px !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.90) !important;
   background-color: rgba(74, 158, 255, 0.18) !important;
   transform: scale(1.12) !important;
 }
@@ -249,14 +249,16 @@
 }
 
 .player-btn--close:focus {
-  outline: 2px solid rgba(74, 158, 255, 0.90);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.90);
   background-color: rgba(200, 50, 50, 0.8);
   border-color: #e74c3c;
   color: #fff;
 }
 
 .player-btn--close.player-btn--focused {
-  outline: 2px solid rgba(74, 158, 255, 0.90) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.90) !important;
   background-color: rgba(200, 50, 50, 0.8) !important;
   border-color: #e74c3c !important;
   color: #fff !important;

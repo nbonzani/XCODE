@@ -17,6 +17,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import ContentCard from './ContentCard.jsx';
 import { KEY } from '../../constants/keyCodes.js';
 import { createClientFromConfig } from '../../services/xtreamApi.js';
+import { usePlayerStore } from '../../store/playerStore.js';
 
 const PAGE_SIZE = 40;
 
@@ -146,6 +147,8 @@ const ContentGrid = React.memo(function ContentGrid({
   items,
   type,
   onItemSelect,
+  onToggleFavorite,
+  favoritesSet,
   isActive,
   onFocusUp,
   onFocusLeft,
@@ -162,6 +165,7 @@ const ContentGrid = React.memo(function ContentGrid({
   const carouselRef  = useRef(null);
   const cardRefs     = useRef([]);
   const sortBtnRefs  = useRef([]);
+  const restoredRef  = useRef(false); // empêche la restauration du focus après le 1er montage
 
   // ── Items triés ───────────────────────────────────────────────────────────
   const sortedItems = useMemo(() => sortItems(items, sortState), [items, sortState]);
@@ -172,6 +176,21 @@ const ContentGrid = React.memo(function ContentGrid({
     setFocusedIndex(0);
     setZone('carousel');
   }, [items]);
+
+  // Restauration du focus sur le dernier item joué (après retour du lecteur)
+  // S'exécute après l'effet de reset ci-dessus (ordre de définition) → gagne la priorité
+  useEffect(() => {
+    if (restoredRef.current || items.length === 0) return;
+    const lastItemId = usePlayerStore.getState().itemId;
+    if (!lastItemId) { restoredRef.current = true; return; }
+    const idx = sortedItems.findIndex(
+      (item) => String(item.stream_id || item.series_id) === String(lastItemId)
+    );
+    if (idx < 0) { restoredRef.current = true; return; }
+    restoredRef.current = true;
+    if (idx >= PAGE_SIZE) setDisplayedCount(Math.ceil((idx + 1) / PAGE_SIZE) * PAGE_SIZE);
+    setFocusedIndex(idx);
+  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Focus DOM ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -270,10 +289,24 @@ const ContentGrid = React.memo(function ContentGrid({
         break;
       case KEY.DOWN:
         e.preventDefault();
+        if (focusedItem && onToggleFavorite) {
+          const effectiveType = type === 'mixed'
+            ? (focusedItem.series_id && !focusedItem.stream_id ? 'series' : 'movie')
+            : type;
+          onToggleFavorite(focusedItem, effectiveType);
+          // Après suppression d'un favori, l'élément DOM disparaît → focus perdu.
+          // On repose le focus après que React a mis à jour le DOM.
+          setTimeout(() => {
+            const card = cardRefs.current[0];
+            if (card) card.focus({ preventScroll: true });
+            else onFocusUp?.();
+          }, 80);
+        }
         break;
       default: return;
     }
   }, [isActive, zone, headerIdx, focusedIndex, visibleItems.length, displayedCount,
+      focusedItem, type, onToggleFavorite,
       loadNextPage, onFocusUp, onFocusLeft]);
 
   // ── Données hero ──────────────────────────────────────────────────────────
@@ -403,17 +436,21 @@ const ContentGrid = React.memo(function ContentGrid({
         </div>
 
         <div className="content-carousel__track" ref={carouselRef}>
-          {visibleItems.map((item, idx) => (
-            <ContentCard
-              key={item.stream_id || item.series_id || idx}
-              item={item}
-              type={type}
-              isFocused={idx === focusedIndex && isActive && zone === 'carousel'}
-              onSelect={onItemSelect}
-              tabIndex={idx === focusedIndex && zone === 'carousel' ? 0 : -1}
-              cardRef={(el) => (cardRefs.current[idx] = el)}
-            />
-          ))}
+          {visibleItems.map((item, idx) => {
+            const itemId = item.stream_id || item.series_id;
+            return (
+              <ContentCard
+                key={item.stream_id || item.series_id || idx}
+                item={item}
+                type={type}
+                isFocused={idx === focusedIndex && isActive && zone === 'carousel'}
+                isFav={favoritesSet ? favoritesSet.has(String(itemId)) : false}
+                onSelect={onItemSelect}
+                tabIndex={idx === focusedIndex && zone === 'carousel' ? 0 : -1}
+                cardRef={(el) => (cardRefs.current[idx] = el)}
+              />
+            );
+          })}
         </div>
       </div>
     </div>

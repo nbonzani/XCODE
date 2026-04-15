@@ -17,7 +17,7 @@ import { useSync }         from '../hooks/useSync.js';
 import { usePlayerStore }  from '../store/playerStore.js';
 import { createClientFromConfig } from '../services/xtreamApi.js';
 import { getLastWatchedSeries } from '../services/watchHistoryService.js';
-import { getFavorites, getFavoritesCount } from '../services/favoritesService.js';
+import { getFavorites, getFavoritesCount, toggleFavorite } from '../services/favoritesService.js';
 import { getWatchPosition, formatPosition } from '../services/watchPositionService.js';
 import { KEY } from '../constants/keyCodes.js';
 
@@ -57,7 +57,7 @@ export default function HomeScreen() {
 
   const openSidebar = useCallback(() => {
     setSidebarOpen(true);
-    setTimeout(() => sidebarRef.current?.focusActiveTab(), 80);
+    setTimeout(() => sidebarRef.current?.focusToutesCategory(), 80);
   }, []);
 
   const closeSidebar = useCallback(() => {
@@ -90,6 +90,11 @@ export default function HomeScreen() {
     setFavorites(getFavorites());
     setFavCount(getFavoritesCount());
   }, []);
+
+  const handleToggleFavorite = useCallback((item, type) => {
+    toggleFavorite(item, type);
+    refreshFavorites();
+  }, [refreshFavorites]);
   useEffect(() => { refreshFavorites(); }, [refreshFavorites]);
   useEffect(() => {
     const onFocus = () => refreshFavorites();
@@ -99,6 +104,13 @@ export default function HomeScreen() {
   const favoriteItems = activeTab === 'favorites'
     ? [...favorites.movies, ...favorites.series]
     : [];
+
+  const favoritesSet = React.useMemo(() => {
+    const s = new Set();
+    favorites.movies.forEach((m) => s.add(String(m.stream_id)));
+    favorites.series.forEach((sr) => s.add(String(sr.series_id)));
+    return s;
+  }, [favorites]);
 
   // ── Chargement catalogue ──────────────────────────────────────────────
   useEffect(() => {
@@ -316,6 +328,7 @@ export default function HomeScreen() {
             {activeTab === 'movies' && (
               <ContentGrid
                 items={filteredMovies} type="movie" onItemSelect={handleItemSelect}
+                onToggleFavorite={handleToggleFavorite} favoritesSet={favoritesSet}
                 isActive={activeTab === 'movies'} onFocusUp={handleGridUp} onFocusLeft={handleGridLeft}
                 config={config}
                 categoryLabel={selectedCategoryId ? activeCategories.find(c => String(c.category_id) === String(selectedCategoryId))?.category_name || null : null}
@@ -324,13 +337,19 @@ export default function HomeScreen() {
             {activeTab === 'series' && (
               <ContentGrid
                 items={filteredSeries} type="series" onItemSelect={handleItemSelect}
+                onToggleFavorite={handleToggleFavorite} favoritesSet={favoritesSet}
                 isActive={activeTab === 'series'} onFocusUp={handleGridUp} onFocusLeft={handleGridLeft}
                 config={config}
                 categoryLabel={selectedCategoryId ? activeCategories.find(c => String(c.category_id) === String(selectedCategoryId))?.category_name || null : null}
               />
             )}
             {activeTab === 'favorites' && (
-              <ContentGrid items={favoriteItems} type="mixed" onItemSelect={handleItemSelect} isActive={activeTab === 'favorites'} onFocusUp={handleGridUp} onFocusLeft={handleGridLeft} config={config} />
+              <ContentGrid
+                items={favoriteItems} type="mixed" onItemSelect={handleItemSelect}
+                onToggleFavorite={handleToggleFavorite} favoritesSet={favoritesSet}
+                isActive={activeTab === 'favorites'} onFocusUp={handleGridUp} onFocusLeft={handleGridLeft}
+                config={config}
+              />
             )}
           </>
         )}

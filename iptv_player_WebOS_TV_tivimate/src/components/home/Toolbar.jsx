@@ -143,7 +143,6 @@ const Toolbar = React.forwardRef(function Toolbar({
             value={localQuery}
             onChange={(e) => {
               setLocalQuery(e.target.value);
-              onSearchChange(e.target.value);
             }}
             autoComplete="off"
             spellCheck={false}
