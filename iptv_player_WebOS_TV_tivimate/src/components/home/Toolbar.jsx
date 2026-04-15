@@ -3,7 +3,7 @@
  *
  * Navigation télécommande :
  *   ←   depuis Recherche (idx 0) → aller à la Sidebar (onFocusLeft)
- *   ←/→ : se déplacer entre Recherche, Sync, Vider cache, Paramètres
+ *   ←/→ : se déplacer entre Recherche, Sync, Paramètres
  *   ↓   : descendre vers TabBar (onFocusDown)
  *   OK  : activer l'élément
  *
@@ -32,10 +32,9 @@ const Toolbar = React.forwardRef(function Toolbar({
   const searchBtnRef = useRef(null);
   const searchInputRef = useRef(null);
   const syncRef      = useRef(null);
-  const clearRef     = useRef(null);
   const settingsRef  = useRef(null);
 
-  const navRefs = [searchBtnRef, syncRef, clearRef, settingsRef];
+  const navRefs = [searchBtnRef, syncRef, settingsRef];
 
   useImperativeHandle(ref, () => ({
     // Si l'input est ouvert → focus dessus ; sinon → focus sur le bouton
@@ -163,9 +162,6 @@ const Toolbar = React.forwardRef(function Toolbar({
 
       <button ref={syncRef} className="toolbar__btn toolbar__btn--sync action-button" tabIndex={0} onClick={onSync} disabled={isSyncing}>
         {isSyncing ? '⏳ Sync…' : '🔄 Synchroniser'}
-      </button>
-      <button ref={clearRef} className="toolbar__btn toolbar__btn--clear action-button" tabIndex={0} onClick={onSyncFresh} disabled={isSyncing}>
-        🗑 Vider le cache
       </button>
       <button ref={settingsRef} className="toolbar__btn toolbar__btn--settings action-button" tabIndex={0} onClick={onSettings}>
         ⚙ Paramètres

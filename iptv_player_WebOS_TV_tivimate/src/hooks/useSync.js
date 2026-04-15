@@ -40,7 +40,7 @@ export function useSync() {
 
     try {
       const client      = createClientFromConfig(config);
-      const frenchOnly  = config.frenchOnly !== false; // true par défaut
+      const frenchOnly  = config.frenchOnly === true; // false si non défini (nouveaux configs)
 
       setStatus('Connexion au serveur…');
       await client.authenticate();

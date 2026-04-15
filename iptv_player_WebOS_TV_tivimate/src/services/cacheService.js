@@ -327,8 +327,9 @@ export async function needsSync(maxAgeDays = 30) {
  */
 export async function clearCache() {
   const db = await getDB();
+  // Efface également sync_meta pour forcer un re-sync complet au prochain lancement
   const tx = db.transaction(
-    ['movies', 'series', 'vod_categories', 'series_categories'],
+    ['movies', 'series', 'vod_categories', 'series_categories', 'sync_meta'],
     'readwrite'
   );
   await Promise.all([
@@ -336,6 +337,7 @@ export async function clearCache() {
     tx.objectStore('series').clear(),
     tx.objectStore('vod_categories').clear(),
     tx.objectStore('series_categories').clear(),
+    tx.objectStore('sync_meta').clear(),
   ]);
   await tx.done;
 }

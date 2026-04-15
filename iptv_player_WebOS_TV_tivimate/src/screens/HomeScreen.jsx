@@ -56,6 +56,42 @@ export default function HomeScreen() {
   const gridRef    = useRef(null);
   const resumeRef  = useRef(null);
 
+  // ── Confirmation synchronisation ─────────────────────────────────────
+  const [showSyncConfirm, setShowSyncConfirm] = useState(false);
+  const [syncConfirmIdx,  setSyncConfirmIdx]  = useState(0); // 0=Annuler 1=Confirmer
+  const syncConfirmBtns = useRef([]);
+
+  const openSyncConfirm = useCallback(() => {
+    setSyncConfirmIdx(0);
+    setShowSyncConfirm(true);
+    setTimeout(() => syncConfirmBtns.current[0]?.focus(), 50);
+  }, []);
+
+  const closeSyncConfirm = useCallback(() => {
+    setShowSyncConfirm(false);
+  }, []);
+
+  useEffect(() => {
+    if (!showSyncConfirm) return;
+    const handler = (e) => {
+      if (e.keyCode === KEY.LEFT || e.keyCode === KEY.RIGHT) {
+        e.preventDefault();
+        const next = syncConfirmIdx === 0 ? 1 : 0;
+        setSyncConfirmIdx(next);
+        syncConfirmBtns.current[next]?.focus();
+      } else if (e.keyCode === KEY.OK) {
+        e.preventDefault();
+        if (syncConfirmIdx === 1) { closeSyncConfirm(); sync(); }
+        else closeSyncConfirm();
+      } else if (e.keyCode === 461 || e.keyCode === 8) { // BACK
+        e.preventDefault();
+        closeSyncConfirm();
+      }
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
+  }, [showSyncConfirm, syncConfirmIdx, closeSyncConfirm, sync]);
+
   // ── État de la sidebar (overlay) ──────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -129,14 +165,19 @@ export default function HomeScreen() {
       return;
     }
 
-    // alreadyLoaded : sert uniquement à éviter de déclencher un resync
-    // à chaque retour depuis la fiche série. On relit toujours le cache
-    // (lecture IndexedDB locale rapide) pour appliquer la config courante.
+    // Si le store Zustand a déjà des données en mémoire, pas besoin de relire
+    // IndexedDB : le store survit aux navigations (player, fiche série, etc.).
     const alreadyLoaded = useCatalogStore.getState().allMovies.length > 0;
 
+    if (alreadyLoaded) {
+      // Données déjà en mémoire → pas de rechargement, juste remettre le focus
+      setTimeout(focusFirstCard, 400);
+      return;
+    }
+
+    // Premier chargement : lecture rapide (60 items) puis lecture complète
     loadCatalogStore(loadCatalogFast, config.frenchOnly, selMovCats, selSerCats).then(async () => {
       loadCatalogStore(loadCatalog, config.frenchOnly, selMovCats, selSerCats).then(async () => {
-        if (alreadyLoaded) return; // retour navigation normale → pas de resync
         const shouldSync = await needsSync(30);
         const isEmpty    = useCatalogStore.getState().allMovies.length === 0;
         if (shouldSync || isEmpty) sync();
@@ -248,6 +289,27 @@ export default function HomeScreen() {
   return (
     <div className="home-screen">
 
+      {/* ── Confirmation synchronisation ── */}
+      {showSyncConfirm && (
+        <div className="sync-confirm-overlay">
+          <div className="sync-confirm-box">
+            <p className="sync-confirm-msg">Relancer la synchronisation du catalogue ?</p>
+            <div className="sync-confirm-btns">
+              <button
+                ref={(el) => { syncConfirmBtns.current[0] = el; }}
+                className={`sync-confirm-btn ${syncConfirmIdx === 0 ? 'focused' : ''}`}
+                onClick={closeSyncConfirm}
+              >Annuler</button>
+              <button
+                ref={(el) => { syncConfirmBtns.current[1] = el; }}
+                className={`sync-confirm-btn sync-confirm-btn--ok ${syncConfirmIdx === 1 ? 'focused' : ''}`}
+                onClick={() => { closeSyncConfirm(); sync(); }}
+              >Synchroniser</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Backdrop sidebar ── */}
       {sidebarOpen && (
         <div className="sidebar-backdrop" onClick={() => { closeSidebar(); setTimeout(focusFirstCard, 50); }} />
@@ -275,7 +337,7 @@ export default function HomeScreen() {
         searchQuery={searchQuery}
         onSearchChange={handleSearchChange}
         isSyncing={isSyncing}
-        onSync={sync}
+        onSync={openSyncConfirm}
         onSyncFresh={syncFresh}
         onSettings={() => navigate('/settings')}
         onFocusDown={handleToolbarDown}

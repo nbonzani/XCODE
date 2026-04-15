@@ -21,6 +21,7 @@ const DEFAULT_CONFIG = {
   filterLanguage:           [],  // ['FR','IT',...] | [] (tout)
   selectedMovieCategories:  [],  // [] = toutes, [id, ...] = filtrées
   selectedSeriesCategories: [],  // [] = toutes, [id, ...] = filtrées
+  catalogSetupDone:         false, // true dès que l'utilisateur a validé un filtre (ou "Tout")
 };
 
 // Lecture synchrone du localStorage au chargement du module.
@@ -60,6 +61,9 @@ export const useAppStore = create((set, get) => ({
   activeTab:     'movies',
   selectedMovie: null,
 
+  // Données temporaires pour CatalogFilterScreen (évite le state de navigation)
+  pendingCatalogFilter: null,
+
   // No-op : conservé pour compatibilité avec App.jsx
   initConfig: () => {},
 
@@ -91,6 +95,8 @@ export const useAppStore = create((set, get) => ({
   },
 
   failSync: (message) => set({ isSyncing: false, syncStatus: `Erreur : ${message}`, syncProgress: { done: 0, total: 0 } }),
+
+  setPendingCatalogFilter: (data) => set({ pendingCatalogFilter: data }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
 

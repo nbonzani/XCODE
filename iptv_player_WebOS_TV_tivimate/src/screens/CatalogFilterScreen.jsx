@@ -5,15 +5,17 @@
  *
  * Navigation télécommande :
  *   Tab Films / Séries : ←→ entre onglets
- *   Liste catégories   : ↑↓ navigation, OK pour cocher/décocher
- *   Bouton OK          : valide la sélection
+ *   Liste catégories   : ↑↓ navigation (changement de page auto en haut/bas), OK pour cocher/décocher
+ *   Boutons bas        : ↑↓ pour accéder / quitter, ←→ entre boutons
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/appStore.js';
 import { KEY } from '../constants/keyCodes.js';
 import './CatalogFilterScreen.css';
+
+const PAGE_SIZE = 30; // 10 lignes × 3 colonnes
 
 // Détecte si un nom de catégorie contient le code langue donné
 function matchesOneLang(name, lang) {
@@ -34,10 +36,9 @@ function matchesLanguages(categoryName, langs) {
 
 export default function CatalogFilterScreen() {
   const navigate  = useNavigate();
-  const location  = useLocation();
-  const { config, saveConfig } = useAppStore();
+  const { config, saveConfig, pendingCatalogFilter, setPendingCatalogFilter } = useAppStore();
 
-  const { languages = [], movieCategories = [], seriesCategories = [] } = location.state || {};
+  const { languages = [], movieCategories = [], seriesCategories = [] } = pendingCatalogFilter || {};
 
   // Filtrer les catégories par langues sélectionnées (pré-sélection)
   const filteredMovieCats  = movieCategories.filter((c) => matchesLanguages(c.category_name, languages));
@@ -49,6 +50,10 @@ export default function CatalogFilterScreen() {
 
   const [activeTab, setActiveTab] = useState('movies');  // 'movies' | 'series'
 
+  // Pagination : une page par onglet
+  const [moviePage,  setMoviePage]  = useState(0);
+  const [seriesPage, setSeriesPage] = useState(0);
+
   // Sélection : par défaut toutes les catégories filtrées sont cochées
   const [selectedMovieIds,  setSelectedMovieIds]  = useState(
     () => new Set(displayMovieCats.map((c) => String(c.category_id)))
@@ -57,12 +62,11 @@ export default function CatalogFilterScreen() {
     () => new Set(displaySeriesCats.map((c) => String(c.category_id)))
   );
 
-  // Focus : 0 = tab bar, 1..n = categories, last = OK button
-  // area: 'tabs' | 'cats' | 'ok'
+  // Focus : area: 'tabs' | 'cats' | 'ctrl'
   const [focusArea,   setFocusArea]   = useState('cats');
   const [focusedTab,  setFocusedTab]  = useState(0);      // 0=films 1=séries
-  const [focusedCat,  setFocusedCat]  = useState(0);
-  const [focusedCtrl, setFocusedCtrl] = useState(0);     // 0=selectAll 1=deselectAll 2=OK
+  const [focusedCat,  setFocusedCat]  = useState(0);      // index dans la page courante
+  const [focusedCtrl, setFocusedCtrl] = useState(0);      // 0=selectAll 1=deselectAll 2=OK
 
   const tabFilmsRef    = useRef(null);
   const tabSeriesRef   = useRef(null);
@@ -71,9 +75,14 @@ export default function CatalogFilterScreen() {
   const deselectAllRef = useRef(null);
   const okRef          = useRef(null);
 
-  const currentCats = activeTab === 'movies' ? displayMovieCats : displaySeriesCats;
-  const currentSel  = activeTab === 'movies' ? selectedMovieIds  : selectedSeriesIds;
-  const setCurrentSel = activeTab === 'movies' ? setSelectedMovieIds : setSelectedSeriesIds;
+  const currentCats    = activeTab === 'movies' ? displayMovieCats  : displaySeriesCats;
+  const currentSel     = activeTab === 'movies' ? selectedMovieIds   : selectedSeriesIds;
+  const setCurrentSel  = activeTab === 'movies' ? setSelectedMovieIds : setSelectedSeriesIds;
+  const currentPage    = activeTab === 'movies' ? moviePage  : seriesPage;
+  const setCurrentPage = activeTab === 'movies' ? setMoviePage : setSeriesPage;
+
+  const maxPages  = Math.max(1, Math.ceil(currentCats.length / PAGE_SIZE));
+  const pagedCats = currentCats.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
 
   // Focus initial : première catégorie
   useEffect(() => {
@@ -84,7 +93,7 @@ export default function CatalogFilterScreen() {
     }, 100);
   }, []);
 
-  // Quand on change d'onglet, recentrer sur la première cat
+  // Quand on change d'onglet, recentrer sur la première cat de la première page
   useEffect(() => {
     if (focusArea === 'cats') {
       setFocusedCat(0);
@@ -118,14 +127,18 @@ export default function CatalogFilterScreen() {
       filterLanguage: languages,
       selectedMovieCategories:  movIds,
       selectedSeriesCategories: serIds,
+      catalogSetupDone: true,
     });
+    setPendingCatalogFilter(null); // libérer la mémoire
     // needsFreshSync=true → HomeScreen vide le cache et resynchronise avec le nouveau filtre
     navigate('/', { state: { needsFreshSync: true } });
-  }, [selectedMovieIds, selectedSeriesIds, config, language, saveConfig, navigate]);
+  }, [selectedMovieIds, selectedSeriesIds, config, languages, saveConfig, setPendingCatalogFilter, navigate]);
 
   // ── Navigation clavier ──────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
+      const COLS = 3;
+
       if (focusArea === 'tabs') {
         if (e.keyCode === KEY.LEFT) {
           e.preventDefault();
@@ -142,32 +155,57 @@ export default function CatalogFilterScreen() {
           const el = document.activeElement;
           if (el && el.tagName === 'BUTTON') { e.preventDefault(); el.click(); }
         }
+
       } else if (focusArea === 'cats') {
-        const COLS = 3;
         if (e.keyCode === KEY.UP) {
           e.preventDefault();
-          const next = focusedCat - COLS;
-          if (next >= 0) {
-            setFocusedCat(next);
-            catRefs.current[next]?.focus({ preventScroll: false });
+          const prevInPage = focusedCat - COLS;
+          if (prevInPage >= 0) {
+            // Remonter dans la page
+            setFocusedCat(prevInPage);
+            catRefs.current[prevInPage]?.focus({ preventScroll: false });
+          } else if (currentPage > 0) {
+            // Première ligne de la page → page précédente, dernière ligne
+            const prevPage = currentPage - 1;
+            setCurrentPage(prevPage);
+            const prevPageSize = Math.min(PAGE_SIZE, currentCats.length - prevPage * PAGE_SIZE);
+            // Trouver la dernière ligne : même colonne, dernière ligne disponible
+            const col = focusedCat % COLS;
+            const lastRow = Math.floor((prevPageSize - 1) / COLS);
+            const target = Math.min(lastRow * COLS + col, prevPageSize - 1);
+            setFocusedCat(target);
+            setTimeout(() => catRefs.current[target]?.focus(), 0);
           } else {
-            // Première ligne → remonter aux onglets
+            // Première page, première ligne → onglets
             setFocusArea('tabs');
             setFocusedTab(activeTab === 'movies' ? 0 : 1);
             (activeTab === 'movies' ? tabFilmsRef : tabSeriesRef).current?.focus();
           }
+
         } else if (e.keyCode === KEY.DOWN) {
           e.preventDefault();
-          const next = focusedCat + COLS;
-          if (next < currentCats.length) {
-            setFocusedCat(next);
-            catRefs.current[next]?.focus({ preventScroll: false });
+          const nextInPage = focusedCat + COLS;
+          if (nextInPage < pagedCats.length) {
+            // Descendre dans la page
+            setFocusedCat(nextInPage);
+            catRefs.current[nextInPage]?.focus({ preventScroll: false });
+          } else if (currentPage < maxPages - 1) {
+            // Dernière ligne de la page → page suivante
+            const nextPage = currentPage + 1;
+            setCurrentPage(nextPage);
+            const col = focusedCat % COLS;
+            // Même colonne, première ligne de la page suivante
+            const nextPageSize = Math.min(PAGE_SIZE, currentCats.length - nextPage * PAGE_SIZE);
+            const target = Math.min(col, nextPageSize - 1);
+            setFocusedCat(target);
+            setTimeout(() => catRefs.current[target]?.focus(), 0);
           } else {
-            // Dernière ligne → descendre aux boutons
+            // Dernière page, dernière ligne → boutons
             setFocusArea('ctrl');
             setFocusedCtrl(0);
             selectAllRef.current?.focus();
           }
+
         } else if (e.keyCode === KEY.LEFT) {
           e.preventDefault();
           if (focusedCat % COLS > 0) {
@@ -177,16 +215,17 @@ export default function CatalogFilterScreen() {
           }
         } else if (e.keyCode === KEY.RIGHT) {
           e.preventDefault();
-          if (focusedCat % COLS < COLS - 1 && focusedCat + 1 < currentCats.length) {
+          if (focusedCat % COLS < COLS - 1 && focusedCat + 1 < pagedCats.length) {
             const next = focusedCat + 1;
             setFocusedCat(next);
             catRefs.current[next]?.focus({ preventScroll: false });
           }
         } else if (e.keyCode === KEY.OK) {
           e.preventDefault();
-          const cat = currentCats[focusedCat];
+          const cat = pagedCats[focusedCat];
           if (cat) toggleCategory(cat.category_id);
         }
+
       } else if (focusArea === 'ctrl') {
         if (e.keyCode === KEY.UP) {
           e.preventDefault();
@@ -196,7 +235,7 @@ export default function CatalogFilterScreen() {
             [selectAllRef, deselectAllRef, okRef][next].current?.focus();
           } else {
             setFocusArea('cats');
-            const last = Math.max(0, currentCats.length - 1);
+            const last = Math.max(0, pagedCats.length - 1);
             setFocusedCat(last);
             catRefs.current[last]?.focus();
           }
@@ -210,7 +249,6 @@ export default function CatalogFilterScreen() {
           }
         } else if (e.keyCode === KEY.LEFT || e.keyCode === KEY.RIGHT) {
           e.preventDefault();
-          // Naviguer entre selectAll / deselectAll / OK horizontalement
           const refs = [selectAllRef, deselectAllRef, okRef];
           const next = e.keyCode === KEY.RIGHT
             ? Math.min(2, focusedCtrl + 1)
@@ -225,7 +263,7 @@ export default function CatalogFilterScreen() {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [focusArea, focusedTab, focusedCat, focusedCtrl, activeTab, currentCats, toggleCategory]);
+  }, [focusArea, focusedTab, focusedCat, focusedCtrl, activeTab, currentCats, pagedCats, currentPage, maxPages, setCurrentPage, toggleCategory]);
 
   const fc = (area, idx) => focusArea === area && (idx === undefined || focusedCtrl === idx) ? 'focused' : '';
 
@@ -238,7 +276,7 @@ export default function CatalogFilterScreen() {
         </p>
       </div>
 
-      {/* Tab bar */}
+      {/* Tab bar + pagination */}
       <div className="catalog-filter-tabs">
         <button
           ref={tabFilmsRef}
@@ -258,11 +296,17 @@ export default function CatalogFilterScreen() {
         >
           Séries ({selectedSeriesIds.size} / {displaySeriesCats.length})
         </button>
+
+        {maxPages > 1 && (
+          <div className="catalog-filter-page-indicator">
+            Page {currentPage + 1} / {maxPages}
+          </div>
+        )}
       </div>
 
       {/* Liste des catégories */}
       <div className="catalog-filter-list">
-        {currentCats.map((cat, i) => {
+        {pagedCats.map((cat, i) => {
           const id  = String(cat.category_id);
           const sel = currentSel.has(id);
           return (

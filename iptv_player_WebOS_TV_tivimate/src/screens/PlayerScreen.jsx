@@ -260,9 +260,10 @@ export default function PlayerScreen() {
   var itemId         = store.itemId;
   var startTime      = store.startTime || 0;
 
-  var videoRef     = useRef(null);
-  var hlsRef       = useRef(null);
-  var hideTimerRef = useRef(null);
+  var videoRef           = useRef(null);
+  var hlsRef             = useRef(null);
+  var hideTimerRef       = useRef(null);
+  var videoHasPlayedRef  = useRef(false); // true dès le premier onPlaying
 
   // Refs boutons barre
   var btnPrevRef  = useRef(null);
@@ -320,6 +321,7 @@ export default function PlayerScreen() {
   // ── Timer contrôles ──────────────────────────────────────────────────────
   var showControlsTemporarily = useCallback(function(timeout) {
     setShowControls(true);
+    if (!videoHasPlayedRef.current) return; // pas encore joué : affiche mais ne démarre pas le timer
     clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(function() {
       setBtnMode(function(bm) { if (!bm) setShowControls(false); return bm; });
@@ -487,6 +489,7 @@ export default function PlayerScreen() {
 
   useEffect(function() {
     if (!streamUrl) { navigate(-1); return; }
+    videoHasPlayedRef.current = false; // reset : nouveau stream, pas encore joué
     loadStream(streamUrl, startTime);
     setShowControls(true); // affiche les contrôles sans démarrer le timer — le timer part sur onPlaying
     return function() { clearTimeout(hideTimerRef.current); if (hlsRef.current) hlsRef.current.destroy(); };
@@ -657,7 +660,7 @@ export default function PlayerScreen() {
         ref={videoRef}
         className="player-video"
         onPlay={function()    { setIsPlaying(true);  }}
-        onPlaying={function() { setIsPlaying(true); showControlsTemporarily(2000); }}
+        onPlaying={function() { setIsPlaying(true); videoHasPlayedRef.current = true; showControlsTemporarily(2000); }}
         onPause={function()   { setIsPlaying(false); }}
         onTimeUpdate={function() {
           var v = videoRef.current;

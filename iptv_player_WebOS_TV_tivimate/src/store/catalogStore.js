@@ -44,8 +44,8 @@ function applyFilters(items, query, categoryId, frenchOnly, frenchCategoryIds, s
     result = result.filter((item) => String(item.category_id) === String(categoryId));
   }
 
-  // Filtre FR uniquement
-  if (frenchOnly && frenchCategoryIds.length > 0) {
+  // Filtre FR uniquement — ignoré si un filtre de catégories utilisateur est actif
+  if (frenchOnly && frenchCategoryIds.length > 0 && (!selectedCategoryIds || selectedCategoryIds.length === 0)) {
     const frSet = new Set(frenchCategoryIds.map(String));
     result = result.filter((item) => frSet.has(String(item.category_id)));
   }
@@ -191,18 +191,20 @@ export const useCatalogStore = create((set, get) => ({
 
   /**
    * Réinitialise les filtres et recharge le catalogue filtré.
-   * @param {string}  activeTab
-   * @param {boolean} frenchOnly
+   * @param {string}   activeTab
+   * @param {boolean}  frenchOnly
+   * @param {string[]} selectedMovieCategories
+   * @param {string[]} selectedSeriesCategories
    */
-  resetFilters: (activeTab, frenchOnly) => {
+  resetFilters: (activeTab, frenchOnly, selectedMovieCategories, selectedSeriesCategories) => {
     const state = get();
     const { allMovies, allSeries, frenchMovieCategoryIds, frenchSeriesCategoryIds } = state;
 
     set({
       searchQuery: '',
       selectedCategoryId: '',
-      filteredMovies: applyFilters(allMovies, '', '', frenchOnly, frenchMovieCategoryIds),
-      filteredSeries: applyFilters(allSeries, '', '', frenchOnly, frenchSeriesCategoryIds),
+      filteredMovies: applyFilters(allMovies, '', '', frenchOnly, frenchMovieCategoryIds, selectedMovieCategories || []),
+      filteredSeries: applyFilters(allSeries, '', '', frenchOnly, frenchSeriesCategoryIds, selectedSeriesCategories || []),
     });
   },
 

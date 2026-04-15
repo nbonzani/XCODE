@@ -2,7 +2,7 @@
 
 .catalog-filter-screen {
   width: 1920px;
-  min-height: 1080px;
+  height: 1080px;
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-family: var(--font-family-base);
@@ -59,19 +59,29 @@
   box-shadow: 0 0 0 3px var(--color-accent, #e50914);
 }
 
-/* Liste des catégories : 3 colonnes */
+/* Indicateur de pagination */
+.catalog-filter-page-indicator {
+  margin-left: auto;
+  align-self: center;
+  font-size: 20px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary, #1e1e2e);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 8px 20px;
+}
+
+/* Liste des catégories : 3 colonnes, occupe tout l'espace disponible */
 .catalog-filter-list {
   flex: 1;
+  min-height: 0;       /* indispensable pour que flex:1 fonctionne dans un flex column */
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: minmax(52px, auto);
+  align-content: start;
   gap: 10px 24px;
-  overflow-y: auto;
-  max-height: 680px;
-  padding-right: 12px;
+  overflow: hidden;    /* pas de scroll — pagination */
   margin-bottom: 24px;
-  /* scrollbar discrète */
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-accent, #e50914) transparent;
 }
 
 .catalog-filter-item {

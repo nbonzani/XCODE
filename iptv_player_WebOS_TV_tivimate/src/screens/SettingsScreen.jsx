@@ -138,7 +138,7 @@ function ConnectionStatus({ status }) {
 
 export default function SettingsScreen() {
   const navigate = useNavigate();
-  const { config, isConfigured, saveConfig } = useAppStore();
+  const { config, isConfigured, saveConfig, setPendingCatalogFilter } = useAppStore();
 
   const [serverUrl,  setServerUrl]  = useState(config.serverUrl  || '');
   const [username,   setUsername]   = useState(config.username   || '');
@@ -270,7 +270,15 @@ export default function SettingsScreen() {
         }
       } else if (e.keyCode === KEY.UP) {
         e.preventDefault();
-        applyFocus(focusedIdx - 1);
+        if (showLangPicker && focusedIdx === 3) {
+          // Remonter vers la zone actions langue (Tout / Continuer)
+          setInLangActions(true);
+          setInLangArea(false);
+          setLangActionIdx(1);
+          continuerRef.current?.focus();
+        } else {
+          applyFocus(focusedIdx - 1);
+        }
       } else if (e.keyCode === KEY.RIGHT && focusedIdx === 3) {
         e.preventDefault();
         applyFocus(4);
@@ -350,9 +358,10 @@ export default function SettingsScreen() {
       saveConfig({
         serverUrl: normalizeUrl(serverUrl), port: '', username: username.trim(), password: password.trim(),
         frenchOnly: false,
-        filterLanguage: existing.filterLanguage || '',
+        filterLanguage: existing.filterLanguage || [],
         selectedMovieCategories: existing.selectedMovieCategories || [],
         selectedSeriesCategories: existing.selectedSeriesCategories || [],
+        catalogSetupDone: existing.catalogSetupDone || false,
       });
       navigate('/');
     } catch {
@@ -372,7 +381,7 @@ export default function SettingsScreen() {
       password: password.trim(), frenchOnly: false,
     };
     try {
-      saveConfig({ ...baseConfig, filterLanguage: [], selectedMovieCategories: [], selectedSeriesCategories: [] });
+      saveConfig({ ...baseConfig, filterLanguage: [], selectedMovieCategories: [], selectedSeriesCategories: [], catalogSetupDone: true });
       navigate('/');
     } catch {
       setValidationError('Erreur lors de la sauvegarde.');
@@ -393,13 +402,15 @@ export default function SettingsScreen() {
         client.getSeriesCategories(),
       ]);
       saveConfig({ ...baseConfig, filterLanguage: selectedLangs, selectedMovieCategories: [], selectedSeriesCategories: [] });
-      navigate('/catalog-filter', { state: { languages: selectedLangs, movieCategories: movieCats, seriesCategories: seriesCats } });
+      // Stocker dans le store (évite la limite de taille du navigation state sur webOS)
+      setPendingCatalogFilter({ languages: selectedLangs, movieCategories: movieCats, seriesCategories: seriesCats });
+      navigate('/catalog-filter');
     } catch (err) {
       setValidationError(`Erreur chargement catégories : ${err.message}`);
     } finally {
       setIsLoadingCats(false);
     }
-  }, [serverUrl, username, password, selectedLangs, isLoadingCats, saveConfig, navigate]);
+  }, [serverUrl, username, password, selectedLangs, isLoadingCats, saveConfig, setPendingCatalogFilter, navigate]);
 
   // ── Import M3U : scan USB ──────────────────────────────────────────────
   const handleScanUsb = useCallback(async () => {

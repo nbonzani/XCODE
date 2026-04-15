@@ -79,11 +79,10 @@ function LoadingFallback() {
  * - Une fois configuré, toute navigation vers / affiche HomeScreen normalement.
  */
 function RequireConfig({ children }) {
-  const isConfigured = useAppStore((state) => state.isConfigured);
+  const isConfigured      = useAppStore((state) => state.isConfigured);
+  const catalogSetupDone  = useAppStore((state) => state.config.catalogSetupDone);
 
-  if (!isConfigured) {
-    // replace=true : on remplace l'entrée dans l'historique de navigation
-    // pour que la touche BACK ne revienne pas à la page vierge.
+  if (!isConfigured || !catalogSetupDone) {
     return <Navigate to="/settings" replace />;
   }
 

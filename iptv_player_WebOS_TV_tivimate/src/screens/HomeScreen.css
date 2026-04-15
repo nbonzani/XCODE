@@ -610,3 +610,68 @@
   flex-shrink: 0;
   min-height: var(--statusbar-height);
 }
+
+/* ── Overlay confirmation synchronisation ──────────────────────────────── */
+
+.sync-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.sync-confirm-box {
+  background: var(--color-bg-secondary, #1e1e2e);
+  border: 2px solid var(--color-border, rgba(255,255,255,0.15));
+  border-radius: 16px;
+  padding: 48px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+  min-width: 560px;
+}
+
+.sync-confirm-msg {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-align: center;
+  margin: 0;
+}
+
+.sync-confirm-btns {
+  display: flex;
+  gap: 32px;
+}
+
+.sync-confirm-btn {
+  background: var(--color-bg-tertiary, #2a2a3e);
+  color: var(--color-text-secondary);
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 10px;
+  padding: 18px 48px;
+  font-size: 24px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: box-shadow 0.1s, color 0.1s;
+}
+
+.sync-confirm-btn--ok {
+  background: var(--color-accent, #e50914);
+  color: #fff;
+  border-color: transparent;
+}
+
+.sync-confirm-btn.focused {
+  box-shadow: 0 0 0 3px #fff;
+  color: #fff;
+}
+
+.sync-confirm-btn--ok.focused {
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.8), 0 0 20px rgba(229,9,20,0.5);
+}
