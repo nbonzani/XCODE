@@ -9,7 +9,7 @@
  */
 
 import React, { useEffect, useCallback, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore }     from '../store/appStore.js';
 import { useCatalogStore } from '../store/catalogStore.js';
 import { loadCatalog, loadCatalogFast, needsSync } from '../services/cacheService.js';
@@ -32,6 +32,7 @@ function isBackKey(kc) { return kc === 461 || kc === 8; }
 
 export default function HomeScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const { config, activeTab, setActiveTab, syncStatus } = useAppStore();
   const {
@@ -114,13 +115,22 @@ export default function HomeScreen() {
 
   // ── Chargement catalogue ──────────────────────────────────────────────
   useEffect(() => {
+    const selMovCats = config.selectedMovieCategories  || [];
+    const selSerCats = config.selectedSeriesCategories || [];
+
+    // Retour depuis CatalogFilterScreen → vider le cache et resynchroniser
+    if (location.state?.needsFreshSync) {
+      // Remplacer l'état de navigation pour ne pas re-déclencher au prochain montage
+      navigate('/', { replace: true, state: {} });
+      syncFresh();
+      return;
+    }
+
     const alreadyLoaded = useCatalogStore.getState().allMovies.length > 0;
     if (alreadyLoaded) {
       setTimeout(focusFirstCard, 100);
       return;
     }
-    const selMovCats = config.selectedMovieCategories  || [];
-    const selSerCats = config.selectedSeriesCategories || [];
     loadCatalogStore(loadCatalogFast, config.frenchOnly, selMovCats, selSerCats).then(async () => {
       loadCatalogStore(loadCatalog, config.frenchOnly, selMovCats, selSerCats).then(async () => {
         const shouldSync = await needsSync(30);

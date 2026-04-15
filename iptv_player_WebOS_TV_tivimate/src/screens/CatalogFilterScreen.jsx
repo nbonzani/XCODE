@@ -105,16 +105,16 @@ export default function CatalogFilterScreen() {
   }, [setCurrentSel]);
 
   const handleOk = useCallback(() => {
-    // Valider : si aucune catégorie sélectionnée pour un type → on prend toutes
-    const movIds  = selectedMovieIds.size  > 0 ? [...selectedMovieIds]  : [];
-    const serIds  = selectedSeriesIds.size > 0 ? [...selectedSeriesIds] : [];
+    const movIds = selectedMovieIds.size  > 0 ? [...selectedMovieIds]  : [];
+    const serIds = selectedSeriesIds.size > 0 ? [...selectedSeriesIds] : [];
     saveConfig({
       ...config,
       filterLanguage: language,
       selectedMovieCategories:  movIds,
       selectedSeriesCategories: serIds,
     });
-    navigate('/');
+    // needsFreshSync=true → HomeScreen vide le cache et resynchronise avec le nouveau filtre
+    navigate('/', { state: { needsFreshSync: true } });
   }, [selectedMovieIds, selectedSeriesIds, config, language, saveConfig, navigate]);
 
   // ── Navigation clavier ──────────────────────────────────────────────────

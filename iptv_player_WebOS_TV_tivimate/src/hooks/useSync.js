@@ -45,16 +45,27 @@ export function useSync() {
       setStatus('Connexion au serveur…');
       await client.authenticate();
 
+      // Catégories sélectionnées par le filtre utilisateur ([] = tout)
+      const selMovCatIds  = config.selectedMovieCategories  || [];
+      const selSerCatIds  = config.selectedSeriesCategories || [];
+
       // ── Films ─────────────────────────────────────────────────────────────
 
       setStatus('Téléchargement des catégories de films…');
       const vodCats = await client.getVodCategories();
       await saveVodCategories(vodCats);
 
-      // Filtre FR : ne télécharger que les catégories françaises si activé
-      const vodCatsToFetch = frenchOnly
-        ? vodCats.filter(function(c) { return isFrench(c.category_name); })
-        : vodCats;
+      // Priorité : filtre utilisateur > frenchOnly > tout
+      var vodCatsToFetch;
+      if (selMovCatIds.length > 0) {
+        var selMovSet = new Set(selMovCatIds.map(String));
+        vodCatsToFetch = vodCats.filter(function(c) { return selMovSet.has(String(c.category_id)); });
+        setStatus('Films : filtre utilisateur (' + vodCatsToFetch.length + ' catégories)…');
+      } else if (frenchOnly) {
+        vodCatsToFetch = vodCats.filter(function(c) { return isFrench(c.category_name); });
+      } else {
+        vodCatsToFetch = vodCats;
+      }
 
       const vodCatsMap = Object.fromEntries(
         vodCats.map(function(c) { return [String(c.category_id), c.category_name]; })
@@ -85,9 +96,16 @@ export function useSync() {
       const seriesCats = await client.getSeriesCategories();
       await saveSeriesCategories(seriesCats);
 
-      const seriesCatsToFetch = frenchOnly
-        ? seriesCats.filter(function(c) { return isFrench(c.category_name); })
-        : seriesCats;
+      var seriesCatsToFetch;
+      if (selSerCatIds.length > 0) {
+        var selSerSet = new Set(selSerCatIds.map(String));
+        seriesCatsToFetch = seriesCats.filter(function(c) { return selSerSet.has(String(c.category_id)); });
+        setStatus('Séries : filtre utilisateur (' + seriesCatsToFetch.length + ' catégories)…');
+      } else if (frenchOnly) {
+        seriesCatsToFetch = seriesCats.filter(function(c) { return isFrench(c.category_name); });
+      } else {
+        seriesCatsToFetch = seriesCats;
+      }
 
       const seriesCatsMap = Object.fromEntries(
         seriesCats.map(function(c) { return [String(c.category_id), c.category_name]; })
@@ -118,7 +136,7 @@ export function useSync() {
       await setLastSyncDate();
 
       setStatus('Chargement du catalogue…');
-      await loadCatalogStore(loadCatalog, config.frenchOnly);
+      await loadCatalogStore(loadCatalog, config.frenchOnly, selMovCatIds, selSerCatIds);
 
       finishSync(allMovies.length + allSeries.length);
 
