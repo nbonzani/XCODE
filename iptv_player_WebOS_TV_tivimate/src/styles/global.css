@@ -245,6 +245,13 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Pipeline vidéo natif webOS : le plan hardware est sous le DOM.
+   body et #root doivent être transparents pour laisser passer la vidéo. */
+body.native-player,
+body.native-player #root {
+  background-color: transparent !important;
+}
+
 #root {
   width: 1920px;
   height: 1080px;

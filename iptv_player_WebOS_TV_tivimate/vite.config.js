@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 function webosPlugin() {
   return {
@@ -19,6 +20,8 @@ function webosPlugin() {
 
 export default defineConfig({
   plugins: [
+    // Polyfills Node.js pour JMuxer (stream, buffer, events, process, etc.)
+    nodePolyfills({ protocolImports: false }),
     react({
       babel: {
         plugins: [
@@ -70,7 +73,8 @@ export default defineConfig({
 
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@':      path.resolve(__dirname, './src'),
+      // (stream/buffer gérés par nodePolyfills)
     },
   },
 });

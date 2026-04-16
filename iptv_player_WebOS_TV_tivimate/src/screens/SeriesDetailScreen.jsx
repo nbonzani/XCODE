@@ -17,7 +17,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useAppStore }    from '../store/appStore.js';
 import { useWakeLock }    from '../hooks/useWakeLock.js';
 import { usePlayerStore } from '../store/playerStore.js';
@@ -144,8 +144,9 @@ const EpisodeList = React.memo(function EpisodeList({
 // ── Écran principal ───────────────────────────────────────────────────────────
 
 export default function SeriesDetailScreen() {
-  const { id }   = useParams();
-  const navigate = useNavigate();
+  const { id }        = useParams();
+  const navigate      = useNavigate();
+  const { state: locationState } = useLocation();
   const { config }                   = useAppStore();
   useWakeLock();
   const { playPlaylist } = usePlayerStore();
@@ -223,22 +224,39 @@ export default function SeriesDetailScreen() {
           .sort((a, b) => (parseInt(a.season_num) || 0) - (parseInt(b.season_num) || 0));
         setSeasons(seasonList);
 
-        // Premier épisode non visionné
-        const watched = getWatchedEpisodesSet(seriesId);
-        let firstSeason = seasonList[0]?.season_num || null;
-        let firstEpIdx  = 0;
-        outer: for (const s of seasonList) {
-          for (let i = 0; i < s.episodes.length; i++) {
-            if (!watched.has(String(s.episodes[i].id))) {
-              firstSeason = s.season_num;
-              firstEpIdx  = i;
-              break outer;
+        const focusEpisodeId = locationState?.focusEpisodeId;
+        let targetSeason = seasonList[0]?.season_num || null;
+        let targetEpIdx  = 0;
+
+        if (focusEpisodeId) {
+          // Reprendre : chercher l'épisode exact par son ID
+          outer: for (const s of seasonList) {
+            for (let i = 0; i < s.episodes.length; i++) {
+              if (String(s.episodes[i].id) === String(focusEpisodeId)) {
+                targetSeason = s.season_num;
+                targetEpIdx  = i;
+                break outer;
+              }
+            }
+          }
+        } else {
+          // Comportement par défaut : premier épisode non visionné
+          const watched = getWatchedEpisodesSet(seriesId);
+          outer: for (const s of seasonList) {
+            for (let i = 0; i < s.episodes.length; i++) {
+              if (!watched.has(String(s.episodes[i].id))) {
+                targetSeason = s.season_num;
+                targetEpIdx  = i;
+                break outer;
+              }
             }
           }
         }
-        setActiveSeason(firstSeason);
-        setEpisodeFocusIndex(firstEpIdx);
-        if (seasonList.length <= 1) setFocusPanel('episodes');
+
+        setActiveSeason(targetSeason);
+        setEpisodeFocusIndex(targetEpIdx);
+        // Reprendre → focus direct sur les épisodes ; sinon seulement si 1 saison
+        if (focusEpisodeId || seasonList.length <= 1) setFocusPanel('episodes');
         setIsLoading(false);
       })
       .catch((err) => { setLoadError(err.message); setIsLoading(false); });

@@ -365,24 +365,16 @@ export default function HomeScreen() {
           tabIndex={0}
           role="button"
           onClick={() => {
-            if (lastWatched.streamUrl && lastWatched.episodeId) {
-              const pos = getWatchPosition(lastWatched.episodeId);
-              playSingle(lastWatched.streamUrl, lastWatched.episodeTitle, 'episode', lastWatched.episodeId, pos);
-              navigate('/player');
-            } else {
-              navigate(`/series/${lastWatched.seriesId}`);
-            }
+            navigate(`/series/${lastWatched.seriesId}`, {
+              state: { focusEpisodeId: lastWatched.episodeId || null },
+            });
           }}
           onKeyDown={(e) => {
             if (e.keyCode === KEY.OK) {
               e.preventDefault();
-              if (lastWatched.streamUrl && lastWatched.episodeId) {
-                const pos = getWatchPosition(lastWatched.episodeId);
-                playSingle(lastWatched.streamUrl, lastWatched.episodeTitle, 'episode', lastWatched.episodeId, pos);
-                navigate('/player');
-              } else {
-                navigate(`/series/${lastWatched.seriesId}`);
-              }
+              navigate(`/series/${lastWatched.seriesId}`, {
+                state: { focusEpisodeId: lastWatched.episodeId || null },
+              });
             }
             else if (e.keyCode === KEY.UP)  { e.preventDefault(); handleResumeUp();   }
             else if (e.keyCode === KEY.DOWN) { e.preventDefault(); handleResumeDown(); }

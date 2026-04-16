@@ -29,6 +29,8 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Hls from 'hls.js';
+import WebOSMediaPipeline, { canPlayNatively } from '../services/webosMedia.js';
+import MkvMsePlayer from '../services/mkvMsePlayer.js';
 import { usePlayerStore } from '../store/playerStore.js';
 import { KEY, isBackKey } from '../constants/keyCodes.js';
 import { saveWatchPosition, clearWatchPosition } from '../services/watchPositionService.js';
@@ -260,10 +262,14 @@ export default function PlayerScreen() {
   var itemId         = store.itemId;
   var startTime      = store.startTime || 0;
 
-  var videoRef           = useRef(null);
-  var hlsRef             = useRef(null);
-  var hideTimerRef       = useRef(null);
-  var videoHasPlayedRef  = useRef(false); // true dès le premier onPlaying
+  var videoRef              = useRef(null);
+  var hlsRef                = useRef(null);
+  var hideTimerRef          = useRef(null);
+  var videoHasPlayedRef     = useRef(false); // true dès le premier onPlaying
+  var webosRef              = useRef(null);  // instance WebOSMediaPipeline active
+  var mkvMseRef             = useRef(null);  // instance MkvMsePlayer active
+  var nativeCurrentTimeRef  = useRef(0);     // currentTime suivi via pipeline natif
+  var nativeDurationRef     = useRef(0);     // durée suivie via pipeline natif
 
   // Refs boutons barre
   var btnPrevRef  = useRef(null);
@@ -281,6 +287,11 @@ export default function PlayerScreen() {
   var _ct  = useState(0),      currentTime   = _ct[0],  setCurrentTime   = _ct[1];
   var _du  = useState(0),      duration      = _du[0],  setDuration      = _du[1];
   var _pr  = useState(0),      progress      = _pr[0],  setProgress      = _pr[1];
+
+  // Pipeline natif webOS (AVI, WMV, FLV…)
+  var _un  = useState(false),  useNative     = _un[0],  setUseNative     = _un[1];
+  // Erreur de lecture (format non supporté)
+  var _er  = useState(null),   playerError   = _er[0],  setPlayerError   = _er[1];
 
   // Audio
   var _at  = useState([]),    audioTracks   = _at[0],  setAudioTracks   = _at[1];
@@ -451,40 +462,172 @@ export default function PlayerScreen() {
 
       hlsRef.current = hls;
     } else {
-      video.src = url;
-      video.load();
-      video.onloadedmetadata = function() {
-        selectFrenchAudioTrack(video, null);
-        disableAllSubtitles(video, null);
-        if (seekTo && seekTo > 0) {
-          video.currentTime = seekTo;
-        }
-        var aTracks = readAudioTracks(video, null);
-        setAudioTracks(aTracks);
-        setActiveAudioId(getActiveAudioId(video, null));
-        var sTracks = readSubtitleTracks(video, null);
-        setSubTracks(sTracks);
-        var autoSub = autoSelectForcedSubtitle(video, null, sTracks);
-        setActiveSubId(autoSub);
-        // Lancer la lecture après le seek pour partir du bon point
-        video.play().catch(function(){});
-        // Écouter les changements de pistes audio sur les flux natifs
-        // (utilise addEventListener + try/catch pour compatibilité webOS)
-        if (video.audioTracks) {
-          try {
-            video.audioTracks.addEventListener('change', function() {
-              setAudioTracks(readAudioTracks(video, null));
-              setActiveAudioId(getActiveAudioId(video, null));
-            });
-            video.audioTracks.addEventListener('addtrack', function() {
-              selectFrenchAudioTrack(video, null);
-              setAudioTracks(readAudioTracks(video, null));
-              setActiveAudioId(getActiveAudioId(video, null));
-            });
-          } catch (_) { /* non supporté sur ce navigateur */ }
+      // ── Formats non-HLS ────────────────────────────────────────────────────
+      // Si le navigateur ne peut pas décoder le format ET que le pipeline
+      // natif webOS est disponible → utiliser le pipeline directement.
+      // Sinon : tenter HTML5 avec un onerror qui bascule en natif si ça échoue.
+
+      var nativeCallbacks = {
+        onLoaded: function() {
+          // Flux chargé, commande play envoyée.
+          // Ne pas encore démarrer le timer : videoHasPlayedRef reste false
+          // jusqu'au premier onPlayStateChange(true) — même comportement que
+          // l'événement onPlaying du <video> HTML5.
+        },
+        onTimeUpdate: function(time, dur) {
+          nativeCurrentTimeRef.current = time;
+          nativeDurationRef.current    = dur;
+          setCurrentTime(time);
+          setDuration(dur || 0);
+          if (dur > 0) setProgress(Math.round((time / dur) * 1000));
+        },
+        onPlayStateChange: function(playing) {
+          setIsPlaying(playing);
+          if (playing && !videoHasPlayedRef.current) {
+            // Première vraie lecture → démarrer le timer de masquage
+            videoHasPlayedRef.current = true;
+            showControlsTemporarily(2000);
+          }
+        },
+        onEnded: function() {
+          // la navigation playlist est gérée dans le JSX via goNext
+          setIsPlaying(false);
+        },
+        onError: function(err) {
+          console.error('[WebOSMedia] Erreur pipeline natif :', err);
+        },
+        onCodecError: function(err) {
+          // Codec non supporté par le hardware decoder (erreur 100).
+          // Le pipeline natif ne peut pas afficher la vidéo dans une web app
+          // (webosgavplugin crée une fenêtre native déconnectée du compositor web).
+          console.warn('[WebOSMedia] Codec non supporté :', err);
+          if (webosRef.current) { webosRef.current.unload(); webosRef.current = null; }
+          setUseNative(false);
+          setPlayerError('Format non supporté par ce TV');
         }
       };
+
+      var switchToNative = function(startAt) {
+        // Déconnecter le <video> HTML
+        video.onerror = null;
+        video.onloadedmetadata = null;
+        video.removeAttribute('src');
+        video.load();
+        // Ne pas masquer le <video> : si Luna route la vidéo vers cet élément,
+        // il doit rester visible. setUseNative(false) = player-screen fond opaque.
+        setUseNative(false);
+        var pipeline = new WebOSMediaPipeline();
+        webosRef.current = pipeline;
+        pipeline.load(url, startAt || 0, nativeCallbacks);
+      };
+
+      // Cascade de lecture :
+      //   1. HTML5 natif (URL originale)
+      //   2. HTML5 .ts  (remux MPEG-TS Xtream)
+      //   3. HTML5 .mp4
+      //   4. MkvMsePlayer (fetch + EBML demuxer + JMuxer/MSE) pour MKV H.264
+      //   5. Message d'erreur
+
+      var fallbackExts = ['.ts', '.mp4'];
+
+      // ── Fallback MkvMsePlayer ──────────────────────────────────────────────
+      var switchToMkvMse = function() {
+        console.warn('[Player] → MkvMsePlayer (fetch+MSE)');
+        video.removeAttribute('src');
+        video.load();
+        if (mkvMseRef.current) { mkvMseRef.current.destroy(); mkvMseRef.current = null; }
+        var mkvPlayer = new MkvMsePlayer(video);
+        mkvMseRef.current = mkvPlayer;
+        mkvPlayer.load(url, seekTo || 0, {
+          onLoaded: function() {
+            console.warn('[MSE] flux chargé, lecture démarrée');
+          },
+          // onTimeUpdate : le <video> émet timeupdate via les événements JSX
+          // onEnded     : idem — géré par onEnded du <video> dans le JSX
+          onError: function(err) {
+            console.warn('[MSE] erreur:', err);
+            setPlayerError('Erreur de lecture : ' + err);
+          },
+          onUnsupported: function(reason) {
+            console.warn('[MSE] codec non supporté:', reason);
+            setPlayerError('Format non supporté par ce TV');
+          },
+        });
+      };
+
+      // ── Attacher le <video> HTML5 ──────────────────────────────────────────
+      function attachHtml5(src, fallbackIdx) {
+        setPlayerError(null);
+        setUseNative(false);
+        video.removeAttribute('src');
+        video.load();
+        video.src = src;
+        video.load();
+
+        video.onerror = function() {
+          video.onerror = null;
+          video.onloadedmetadata = null;
+          var nextIdx = (fallbackIdx == null) ? 0 : fallbackIdx + 1;
+          if (nextIdx < fallbackExts.length) {
+            var nextUrl = url.replace(/\.[a-zA-Z0-9]+(\?.*)?$/, function(m, qs) {
+              return fallbackExts[nextIdx] + (qs || '');
+            });
+            console.warn('[Player] échoué → retry', fallbackExts[nextIdx], ':', nextUrl);
+            attachHtml5(nextUrl, nextIdx);
+          } else {
+            // Tous les fallbacks HTML5 ont échoué → tenter MkvMsePlayer
+            var ext = (url.split('?')[0].split('.').pop() || '').toLowerCase();
+            if (ext === 'mkv' || ext === 'webm' || ext === 'avi' || ext === 'wmv' || ext === 'flv' || ext === 'mov') {
+              switchToMkvMse();
+            } else {
+              console.warn('[Player] format non supporté par aucune méthode');
+              setPlayerError('Format non supporté par ce TV');
+            }
+          }
+        };
+
+        video.onloadedmetadata = function() {
+          video.onerror = null; // décodage OK
+          selectFrenchAudioTrack(video, null);
+          disableAllSubtitles(video, null);
+          if (seekTo && seekTo > 0) {
+            video.currentTime = seekTo;
+          }
+          var aTracks = readAudioTracks(video, null);
+          setAudioTracks(aTracks);
+          setActiveAudioId(getActiveAudioId(video, null));
+          var sTracks = readSubtitleTracks(video, null);
+          setSubTracks(sTracks);
+          var autoSub = autoSelectForcedSubtitle(video, null, sTracks);
+          setActiveSubId(autoSub);
+          video.play().catch(function(){});
+          if (video.audioTracks) {
+            try {
+              video.audioTracks.addEventListener('change', function() {
+                setAudioTracks(readAudioTracks(video, null));
+                setActiveAudioId(getActiveAudioId(video, null));
+              });
+              video.audioTracks.addEventListener('addtrack', function() {
+                selectFrenchAudioTrack(video, null);
+                setAudioTracks(readAudioTracks(video, null));
+                setActiveAudioId(getActiveAudioId(video, null));
+              });
+            } catch (_) { /* non supporté sur ce navigateur */ }
+          }
+        }; // fin video.onloadedmetadata
+      } // fin attachHtml5
+
+      attachHtml5(url, null);
     }
+  }, []);
+
+  // ── Transparence body dès que le lecteur est monté ───────────────────────
+  // Sur webOS, le rendu vidéo (même via HLS.js/MSE) passe par le plan hardware
+  // situé SOUS le DOM. body + #root doivent être transparents pour laisser
+  // apparaître l'image, quelle que soit la méthode de lecture.
+  useEffect(function() {
+    document.body.classList.add('native-player');
+    return function() { document.body.classList.remove('native-player'); };
   }, []);
 
   useEffect(function() {
@@ -492,7 +635,13 @@ export default function PlayerScreen() {
     videoHasPlayedRef.current = false; // reset : nouveau stream, pas encore joué
     loadStream(streamUrl, startTime);
     setShowControls(true); // affiche les contrôles sans démarrer le timer — le timer part sur onPlaying
-    return function() { clearTimeout(hideTimerRef.current); if (hlsRef.current) hlsRef.current.destroy(); };
+    return function() {
+      clearTimeout(hideTimerRef.current);
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+      if (webosRef.current) { webosRef.current.unload(); webosRef.current = null; }
+      if (mkvMseRef.current) { mkvMseRef.current.destroy(); mkvMseRef.current = null; }
+      document.body.classList.remove('native-player');
+    };
   }, [streamUrl]);
 
   useEffect(function() {
@@ -502,11 +651,17 @@ export default function PlayerScreen() {
 
   // ── Actions lecture ──────────────────────────────────────────────────────
   var togglePlay = useCallback(function() {
+    if (useNative && webosRef.current) {
+      if (isPlaying) webosRef.current.pause();
+      else           webosRef.current.play();
+      showControlsTemporarily();
+      return;
+    }
     var v = videoRef.current;
     if (!v) return;
     v.paused ? v.play().catch(function(){}) : v.pause();
     showControlsTemporarily();
-  }, [showControlsTemporarily]);
+  }, [useNative, isPlaying, showControlsTemporarily]);
 
   var toggleMute = useCallback(function() {
     var v = videoRef.current;
@@ -525,11 +680,19 @@ export default function PlayerScreen() {
   }, [showControlsTemporarily]);
 
   var seek = useCallback(function(deltaMs) {
+    if (useNative && webosRef.current) {
+      var dur = nativeDurationRef.current || 0;
+      var target = Math.max(0, nativeCurrentTimeRef.current + deltaMs / 1000);
+      if (dur > 0) target = Math.min(dur, target);
+      webosRef.current.seek(target);
+      showControlsTemporarily();
+      return;
+    }
     var v = videoRef.current;
     if (!v || !v.duration) return;
     v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + deltaMs / 1000));
     showControlsTemporarily();
-  }, [showControlsTemporarily]);
+  }, [useNative, showControlsTemporarily]);
 
   // ── Sélection piste audio ────────────────────────────────────────────────
   var selectAudioTrack = useCallback(function(trackId) {
@@ -577,11 +740,21 @@ export default function PlayerScreen() {
   }, [hasNext, nextInPlaylist, showControlsTemporarily]);
 
   var closePlayer = useCallback(function() {
-    var v = videoRef.current;
-    if (v) { saveWatchPosition(itemId, v.currentTime, v.duration); v.pause(); }
+    if (mkvMseRef.current) {
+      mkvMseRef.current.destroy();
+      mkvMseRef.current = null;
+    }
+    if (useNative && webosRef.current) {
+      saveWatchPosition(itemId, nativeCurrentTimeRef.current, nativeDurationRef.current);
+      webosRef.current.unload();
+      webosRef.current = null;
+    } else {
+      var v = videoRef.current;
+      if (v) { saveWatchPosition(itemId, v.currentTime, v.duration); v.pause(); }
+    }
     clearPlayer();
     navigate(-1);
-  }, [clearPlayer, navigate, itemId]);
+  }, [useNative, clearPlayer, navigate, itemId]);
 
   // ── Clavier ──────────────────────────────────────────────────────────────
   useEffect(function() {
@@ -655,10 +828,21 @@ export default function PlayerScreen() {
   var activeSubTrack   = activeSubId >= 0 ? subTracks[activeSubId] : null;
 
   return (
-    <div className="player-screen" onMouseMove={showControlsTemporarily}>
+    <div className={'player-screen' + (useNative ? ' player-screen--native' : '')} onMouseMove={showControlsTemporarily}>
+
+      {/* Message format non supporté */}
+      {playerError && (
+        <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'24px',zIndex:10,backgroundColor:'#000'}}>
+          <div style={{fontSize:'64px'}}>⚠️</div>
+          <div style={{fontSize:'var(--font-size-xl)',color:'#fff',fontWeight:'600',textAlign:'center'}}>{playerError}</div>
+          <div style={{fontSize:'var(--font-size-sm)',color:'rgba(255,255,255,0.5)'}}>Appuyez sur Retour pour quitter</div>
+        </div>
+      )}
+
+      {/* En mode pipeline natif, la vidéo est rendue sur le plan hardware sous la couche HTML */}
       <video
         ref={videoRef}
-        className="player-video"
+        className={'player-video' + (useNative ? ' player-video--hidden' : '')}
         onPlay={function()    { setIsPlaying(true);  }}
         onPlaying={function() { setIsPlaying(true); videoHasPlayedRef.current = true; showControlsTemporarily(2000); }}
         onPause={function()   { setIsPlaying(false); }}

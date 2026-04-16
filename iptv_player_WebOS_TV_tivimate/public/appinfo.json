@@ -11,5 +11,6 @@
   "splashBackground": "",
   "resolution": "1920x1080",
   "allowCrossDomainAccess": true,
-  "disableBackHistoryAPI": false
+  "disableBackHistoryAPI": false,
+  "transparent": true
 }

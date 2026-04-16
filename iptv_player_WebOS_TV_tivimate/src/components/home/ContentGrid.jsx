@@ -162,6 +162,50 @@ const ContentGrid = React.memo(function ContentGrid({
   const [zone,           setZone]           = useState('carousel'); // 'carousel' | 'header'
   const [headerIdx,      setHeaderIdx]      = useState(0);          // index bouton de tri focalisé
 
+  // ── Confirmation suppression favori ──────────────────────────────────────
+  const [favConfirm,    setFavConfirm]    = useState(null); // { item, effectiveType } | null
+  const [favConfirmIdx, setFavConfirmIdx] = useState(0);    // 0=Annuler 1=Supprimer
+  const favConfirmBtns = useRef([]);
+
+  useEffect(() => {
+    if (!favConfirm) return;
+    const handler = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (e.keyCode === KEY.LEFT || e.keyCode === KEY.RIGHT) {
+        const next = favConfirmIdx === 0 ? 1 : 0;
+        setFavConfirmIdx(next);
+        favConfirmBtns.current[next]?.focus();
+      } else if (e.keyCode === KEY.OK) {
+        if (favConfirmIdx === 1) {
+          // Supprimer : appliquer + focus première carte (liste mise à jour)
+          onToggleFavorite(favConfirm.item, favConfirm.effectiveType);
+          setTimeout(() => {
+            const card = cardRefs.current[0];
+            if (card) card.focus({ preventScroll: true });
+            else onFocusUp?.();
+          }, 80);
+        } else {
+          // Annuler : restaurer le focus sur la carte d'origine
+          setTimeout(() => {
+            const card = cardRefs.current[focusedIndex];
+            if (card) card.focus({ preventScroll: true });
+            else onFocusUp?.();
+          }, 80);
+        }
+        setFavConfirm(null);
+      } else if (e.keyCode === 461 || e.keyCode === 8) { // BACK
+        setFavConfirm(null);
+        setTimeout(() => {
+          const card = cardRefs.current[focusedIndex];
+          if (card) card.focus({ preventScroll: true });
+          else onFocusUp?.();
+        }, 80);
+      }
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
+  }, [favConfirm, favConfirmIdx, focusedIndex, onToggleFavorite, onFocusUp]);
+
   const carouselRef  = useRef(null);
   const cardRefs     = useRef([]);
   const sortBtnRefs  = useRef([]);
@@ -289,18 +333,15 @@ const ContentGrid = React.memo(function ContentGrid({
         break;
       case KEY.DOWN:
         e.preventDefault();
-        if (focusedItem && onToggleFavorite) {
-          const effectiveType = type === 'mixed'
-            ? (focusedItem.series_id && !focusedItem.stream_id ? 'series' : 'movie')
-            : type;
-          onToggleFavorite(focusedItem, effectiveType);
-          // Après suppression d'un favori, l'élément DOM disparaît → focus perdu.
-          // On repose le focus après que React a mis à jour le DOM.
-          setTimeout(() => {
-            const card = cardRefs.current[0];
-            if (card) card.focus({ preventScroll: true });
-            else onFocusUp?.();
-          }, 80);
+        // Dialog de suppression sur l'onglet favoris (type==='mixed')
+        if (type === 'mixed' && focusedItem && onToggleFavorite) {
+          const effectiveType = focusedItem.series_id && !focusedItem.stream_id ? 'series' : 'movie';
+          setFavConfirmIdx(0);
+          setFavConfirm({ item: focusedItem, effectiveType });
+          setTimeout(() => favConfirmBtns.current[0]?.focus(), 50);
+        } else if ((type === 'movie' || type === 'series') && focusedItem && onToggleFavorite) {
+          // Toggle favori direct sur les onglets film/série
+          onToggleFavorite(focusedItem, type);
         }
         break;
       default: return;
@@ -453,6 +494,33 @@ const ContentGrid = React.memo(function ContentGrid({
           })}
         </div>
       </div>
+
+      {/* ── Confirmation suppression favori ─────────────────────────────── */}
+      {favConfirm && (
+        <div className="fav-confirm-overlay">
+          <div className="fav-confirm-box">
+            <p className="fav-confirm-msg">
+              Retirer <strong>{favConfirm.item.name}</strong> des favoris ?
+            </p>
+            <div className="fav-confirm-btns">
+              <button
+                ref={(el) => (favConfirmBtns.current[0] = el)}
+                className={`fav-confirm-btn${favConfirmIdx === 0 ? ' fav-confirm-btn--focused' : ''}`}
+                tabIndex={favConfirmIdx === 0 ? 0 : -1}
+              >
+                Annuler
+              </button>
+              <button
+                ref={(el) => (favConfirmBtns.current[1] = el)}
+                className={`fav-confirm-btn fav-confirm-btn--danger${favConfirmIdx === 1 ? ' fav-confirm-btn--focused' : ''}`}
+                tabIndex={favConfirmIdx === 1 ? 0 : -1}
+              >
+                Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

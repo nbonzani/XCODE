@@ -16,7 +16,7 @@
   inset: 0;
   width: 1920px;
   height: 1080px;
-  background-color: #000;
+  background-color: transparent;
   z-index: var(--z-player);
   cursor: none;
   overflow: hidden;
@@ -29,7 +29,19 @@
   width: 1920px;
   height: 1080px;
   object-fit: contain;
-  background-color: #000;
+  background-color: transparent;
+}
+
+/* ── Mode pipeline natif webOS ───────────────────────────────────────────── */
+/* La vidéo est rendue sur le plan hardware de la TV (en-dessous du DOM).    */
+/* Le fond doit être transparent pour la laisser apparaître.                 */
+
+.player-screen--native {
+  background-color: transparent !important;
+}
+
+.player-video--hidden {
+  display: none !important;
 }
 
 /* ── Barre de contrôles (overlay bas) ───────────────────────────────────── */
