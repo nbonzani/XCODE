@@ -1,0 +1,15 @@
+# Build artifacts
+build/
+build-host/
+package/
+dist/
+
+# Test media (large binaries — fetch separately)
+test_videos/
+
+# Generated state (per-machine)
+*.o
+*.obj
+*.so
+*.a
+.cache/

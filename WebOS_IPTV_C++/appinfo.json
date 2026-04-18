@@ -1,0 +1,16 @@
+{
+    "id": "com.iptv.player.native",
+    "version": "0.0.1",
+    "vendor": "nbonzani",
+    "type": "native",
+    "main": "iptv-player",
+    "title": "IPTV Native",
+    "icon": "icon.png",
+    "largeIcon": "largeIcon.png",
+    "iconColor": "#1e1e1e",
+    "splashBackground": "splash.png",
+    "uiRevision": 2,
+    "disableBackHistoryAPI": true,
+    "supportTouchMode": "none",
+    "handlesRelaunch": true
+}
