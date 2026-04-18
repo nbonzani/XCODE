@@ -4,6 +4,7 @@
 
 #include "app/KeyCodes.h"
 #include "store/Cache.h"
+#include "store/Config.h"
 #include "store/Favorites.h"
 #include "ui/FocusManager.h"
 #include "ui/ImageLoader.h"
@@ -36,16 +37,22 @@ HomeScreen::~HomeScreen() = default;
 
 void HomeScreen::load() {
     auto snap = cache_.loadCatalog();
+    // Apply the French-only filter from Config. Drops everything flagged is_french=0
+    // in the cache so the grid is readable on a French Xtream subscription.
+    auto cfg = store::Config::load();
+    const bool frenchOnly = cfg.frenchOnly;
 
     std::vector<GridItem> movies;
     movies.reserve(snap.movies.size());
     for (const auto& m : snap.movies) {
-        movies.push_back({m.stream_id, m.name, ""});
+        if (frenchOnly && !m.is_french) continue;
+        movies.push_back({m.stream_id, m.name, m.stream_icon});
     }
 
     std::vector<GridItem> series;
     series.reserve(snap.series.size());
     for (const auto& s : snap.series) {
+        if (frenchOnly && !s.is_french) continue;
         series.push_back({s.series_id, s.name, s.cover});
     }
 
@@ -69,7 +76,6 @@ void HomeScreen::load() {
 
     // Poster URLs from Xtream aren't stored in Cache directly in this MVP, so movie
     // posters use placeholders. Series covers + favorites carry their raw URL.
-    focus_.clear();
     gridMovies_->setItems(std::move(movies));
     gridMovies_->setOnSelect([this](const GridItem& i){ if (on_movie_) on_movie_(i.id); });
 
@@ -88,13 +94,10 @@ void HomeScreen::load() {
 
 void HomeScreen::switchTab(Tab t) {
     tab_ = t;
-    focus_.clear();
     PosterGrid* grid = gridMovies_.get();
     if (tab_ == Tab::Series)    grid = gridSeries_.get();
     if (tab_ == Tab::Favorites) grid = gridFavorites_.get();
-    // Re-register grid focus nodes by calling setItems with unchanged items would be
-    // wasteful — the grid re-registers focus on setItems(). For tab switches we rely on
-    // the grid keeping its internal state and calling registerFocus implicitly.
+    grid->activate();          // clears FocusManager and re-registers this grid's cells
     grid->prefetchVisible();
 }
 
@@ -104,6 +107,18 @@ void HomeScreen::handleKey(int code, bool& handled) {
     if (code == app::KEY::GREEN)  { switchTab(Tab::Series);    return; }
     if (code == app::KEY::YELLOW) { switchTab(Tab::Favorites); return; }
     if (code == app::KEY::BLUE)   { if (on_settings_) on_settings_(); return; }
+    // Debug hotkey: '1' plays the bundled MPEG-4 ASP test video so we can verify
+    // GStreamer on the TV without depending on the Xtream server.
+    if (code == app::KEY::NUM_1 || code == app::KEY::NUM_2) {
+        const char* file = (code == app::KEY::NUM_1) ? "assets/test_asp.mkv"
+                                                     : "assets/test_h264.mkv";
+        char* base = SDL_GetBasePath();
+        std::string path = base ? (std::string(base) + file) : "";
+        if (base) SDL_free(base);
+        SDL_Log("debug: playing local %s @%s", file, path.c_str());
+        if (on_movie_ && !path.empty()) on_movie_("LOCAL:" + path);
+        return;
+    }
 
     if (code == app::KEY::UP)    { focus_.moveUp();    return; }
     if (code == app::KEY::DOWN)  { focus_.moveDown();  return; }

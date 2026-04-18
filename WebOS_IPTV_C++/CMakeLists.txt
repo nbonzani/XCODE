@@ -100,5 +100,12 @@ if(IPTV_TARGET_WEBOS)
     target_compile_definitions(iptv-player PRIVATE IPTV_WEBOS=1)
     # libluna-service2 ships no .pc in the webosbrew sysroot — link manually.
     target_link_libraries(iptv-player PRIVATE luna-service2 pbnjson_cpp pbnjson_c PmLogLib)
+    # TV has SDL2 2.0.10 but we build against 2.30 — bundle our SDL .so in the IPK
+    # and load them via rpath=$ORIGIN/lib so our binary ignores the TV copies.
+    set_target_properties(iptv-player PROPERTIES
+        INSTALL_RPATH "\$ORIGIN/lib"
+        BUILD_RPATH   "\$ORIGIN/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
     install(TARGETS iptv-player RUNTIME DESTINATION usr/bin)
 endif()

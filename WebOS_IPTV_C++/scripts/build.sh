@@ -41,6 +41,63 @@ cp "$PROJECT_ROOT/assets/splash.png" "$PACKAGE_DIR/" 2>/dev/null || true
 mkdir -p "$PACKAGE_DIR/assets"
 cp "$PROJECT_ROOT/assets/font.ttf"      "$PACKAGE_DIR/assets/" 2>/dev/null || true
 cp "$PROJECT_ROOT/assets/font-bold.ttf" "$PACKAGE_DIR/assets/" 2>/dev/null || true
+cp "$PROJECT_ROOT/assets/test_asp.mkv"  "$PACKAGE_DIR/assets/" 2>/dev/null || true
+cp "$PROJECT_ROOT/assets/test_h264.mkv" "$PACKAGE_DIR/assets/" 2>/dev/null || true
+# Optional pre-baked Xtream credentials (kept out of git — see /tmp/iptv_default_config.json)
+if [[ -f /tmp/iptv_default_config.json ]]; then
+    cp /tmp/iptv_default_config.json "$PACKAGE_DIR/assets/default_config.json"
+    echo "==> baked default_config.json (credentials preset)"
+fi
+
+# Bundle SDL2 + deps that are too recent on the TV (TV has SDL2 2.0.10, we build
+# against 2.30). Binary's rpath = $ORIGIN/lib so these are picked up first.
+SYSROOT="$TOOLCHAIN_ROOT/arm-webos-linux-gnueabi/sysroot"
+mkdir -p "$PACKAGE_DIR/lib"
+bundle_so() {
+    local src="$1"
+    cp --dereference "$src" "$PACKAGE_DIR/lib/$(basename "$(readlink -f "$src")")"
+    # Also create the SONAME symlink the loader expects.
+    local soname
+    soname="$($TOOLCHAIN_ROOT/bin/arm-webos-linux-gnueabi-readelf -d "$src" | awk '/SONAME/ { gsub(/[\[\]]/,""); print $5 }')"
+    if [[ -n "$soname" && "$soname" != "$(basename "$(readlink -f "$src")")" ]]; then
+        ln -sf "$(basename "$(readlink -f "$src")")" "$PACKAGE_DIR/lib/$soname"
+    fi
+}
+# We do NOT bundle SDL2 / SDL2_ttf / SDL2_image : the TV's native ones (2.0.10)
+# integrate with the webOS compositor; our buildroot fork (2.30) does not.
+# Same for freetype/png/jpeg — the TV already has compatible versions.
+# We DO bundle libstdc++ + libgcc_s because GCC 14.2 emits symbol versions the
+# TV's older libstdc++ lacks (e.g. GLIBCXX_3.4.30).
+for lib in libstdc++.so.6; do
+    for base in "$SYSROOT/usr/lib" "$SYSROOT/lib"; do
+        if [[ -f "$base/$lib" ]]; then
+            bundle_so "$base/$lib"
+            break
+        fi
+    done
+done
+# libgcc_s too (GCC 14.2 support symbols newer than webOS 6.5 likely has).
+if [[ -f "$SYSROOT/lib/libgcc_s.so.1" ]]; then
+    bundle_so "$SYSROOT/lib/libgcc_s.so.1"
+fi
+
+# FFmpeg + gst-libav bundle: the TV doesn't ship avdec_mpeg4/h265/mpeg2video so we
+# carry our own. libgstlibav.so goes under lib/gstreamer-1.0/ and is discovered via
+# GST_PLUGIN_PATH set at runtime in main.cpp.
+for lib in libavcodec.so.58 libavformat.so.58 libavutil.so.56 \
+           libswresample.so.3 libswscale.so.5 libavfilter.so.7; do
+    if [[ -f "$SYSROOT/usr/lib/$lib" ]]; then
+        bundle_so "$SYSROOT/usr/lib/$lib"
+    fi
+done
+GST_PLUGIN_SRC="$HOME/webos-toolchain/gst-libav-1.16.3/build/ext/libav/.libs/libgstlibav.so"
+if [[ -f "$GST_PLUGIN_SRC" ]]; then
+    mkdir -p "$PACKAGE_DIR/lib/gstreamer-1.0"
+    cp "$GST_PLUGIN_SRC" "$PACKAGE_DIR/lib/gstreamer-1.0/libgstlibav.so"
+    echo "==> bundled gst-libav plugin"
+fi
+echo "==> Bundled .so"
+ls -la "$PACKAGE_DIR/lib/" | head
 
 # Move binary to package root
 if [[ -f "$PACKAGE_DIR/usr/bin/iptv-player" ]]; then

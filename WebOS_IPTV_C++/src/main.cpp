@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -17,6 +18,10 @@
 #include <mutex>
 #include <string>
 #include <vector>
+
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <glib.h>
 
@@ -41,7 +46,14 @@
 #include "xtream/CatalogSync.h"
 #include "xtream/XtreamClient.h"
 
+#include <thread>
+#include <curl/curl.h>
+
 namespace {
+
+// Forward decl — diag() is defined further down in another anonymous namespace
+// block; App::loop() and others in *this* block need to call it.
+void diag(const char* fmt, ...);
 
 constexpr int kWidth  = 1920;
 constexpr int kHeight = 1080;
@@ -248,31 +260,41 @@ int syncTest() {
 class App {
 public:
     int run() {
+        SDL_Log("App::run() entering");
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) != 0) {
-            std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
+            SDL_Log("SDL_Init failed: %s", SDL_GetError());
             return 1;
         }
+        SDL_Log("SDL_Init OK, video driver=%s", SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "?");
         window_ = SDL_CreateWindow(
             "IPTV Native", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
             kWidth, kHeight, SDL_WINDOW_FULLSCREEN);
-        if (!window_) { std::fprintf(stderr, "Window: %s\n", SDL_GetError()); return 1; }
+        if (!window_) { SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError()); return 1; }
+        SDL_Log("Window created");
         renderer_ = SDL_CreateRenderer(window_, -1,
             SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-        if (!renderer_) { std::fprintf(stderr, "Renderer: %s\n", SDL_GetError()); return 1; }
+        if (!renderer_) { SDL_Log("SDL_CreateRenderer failed: %s", SDL_GetError()); return 1; }
+        SDL_Log("Renderer created");
 
         std::string fontPath = resolveFontPath();
+        SDL_Log("Font path: %s", fontPath.empty() ? "(empty)" : fontPath.c_str());
         if (fontPath.empty()) {
-            std::fprintf(stderr, "Aucune font TTF trouvée — abandon\n");
+            SDL_Log("Aucune font TTF trouvée — abandon");
             return 1;
         }
-        if (!text_.init(renderer_, fontPath, 24)) return 1;
+        if (!text_.init(renderer_, fontPath, 24)) { SDL_Log("text_.init failed"); return 1; }
+        SDL_Log("TextRenderer init OK");
 
         images_.start(renderer_, 2);
+        SDL_Log("ImageLoader started");
         cache_.open();
+        SDL_Log("Cache opened");
 
         lifecycle_.start("com.iptv.player.native");
+        SDL_Log("Lifecycle started");
 
         config_ = iptv::store::Config::load();
+        SDL_Log("Config loaded: server=%s user=%s", config_.serverUrl.c_str(), config_.username.c_str());
         recreateXtreamClient();
 
         settings_ = std::make_unique<iptv::ui::SettingsScreen>(text_, focus_);
@@ -286,15 +308,30 @@ public:
         home_->setOnOpenSettings([this]{ gotoSettings(); });
 
         if (config_.serverUrl.empty() || config_.username.empty()) {
+            SDL_Log("No config -> gotoSettings");
             gotoSettings();
         } else {
+            // Trigger background sync if the catalog cache is empty. The home screen
+            // will show empty grids until the sync completes and refreshes them.
+            int64_t nm = cache_.movieCount(false);
+            int64_t ns = cache_.seriesCount(false);
+            SDL_Log("Cache before sync: movies=%lld series=%lld",
+                    static_cast<long long>(nm), static_cast<long long>(ns));
+            if (nm == 0 && ns == 0 && client_) {
+                SDL_Log("Starting background CatalogSync…");
+                sync_thread_ = std::thread([this]{ runBackgroundSync(); });
+            }
+            SDL_Log("Have config -> gotoHome");
             gotoHome();
         }
 
+        SDL_Log("Entering main loop");
         return loop();
     }
 
     ~App() {
+        sync_abort_ = true;
+        if (sync_thread_.joinable()) sync_thread_.join();
         if (decoder_) decoder_->stop();
         lifecycle_.stop();
         text_.clear();
@@ -306,6 +343,26 @@ public:
 
 private:
     enum class Screen { None, Settings, Home, Series, Player };
+
+    void runBackgroundSync() {
+        if (!client_) return;
+        sync_active_ = true;
+        sync_phase_ = "démarrage";
+        iptv::xtream::CatalogSync sync(*client_, cache_);
+        auto res = sync.run(config_,
+            [this](const iptv::xtream::SyncProgress& p){
+                std::lock_guard<std::mutex> lk(sync_mu_);
+                sync_phase_ = p.phase;
+                sync_done_ = p.done;
+                sync_total_ = p.total;
+                sync_category_ = p.currentCategoryName;
+            },
+            [this]{ return sync_abort_.load(); });
+        SDL_Log("[sync] done ok=%d movies=%d series=%d err=%s",
+                res.ok, res.moviesSaved, res.seriesSaved, res.error.c_str());
+        sync_active_ = false;
+        catalog_dirty_ = true;
+    }
 
     void recreateXtreamClient() {
         if (config_.serverUrl.empty()) return;
@@ -323,11 +380,20 @@ private:
         home_->load();
     }
     void onOpenMovie(const std::string& streamId) {
-        if (!client_) return;
+        SDL_Log("onOpenMovie streamId=%s", streamId.c_str());
+        // Debug path: "LOCAL:<absolute-path>" bypasses Xtream and plays a local file.
+        if (streamId.compare(0, 6, "LOCAL:") == 0) {
+            std::string path = streamId.substr(6);
+            playUrl(path, "local_test", "", "Local test MPEG-4 ASP");
+            return;
+        }
+        if (!client_) { SDL_Log("onOpenMovie: no client"); return; }
         std::string ext = "mkv";
         std::string title = "Film";
         try {
+            SDL_Log("onOpenMovie: calling getVodInfo (blocking)");
             auto info = client_->getVodInfo(streamId);
+            SDL_Log("onOpenMovie: getVodInfo ok, parsing");
             // Xtream returns either "info" or "movie_data" — try both.
             for (const char* k : {"info", "movie_data"}) {
                 if (!info.contains(k) || !info[k].is_object()) continue;
@@ -344,6 +410,7 @@ private:
             std::fprintf(stderr, "[router] getVodInfo failed (%s) — using defaults\n", e.what());
         }
         std::string url = client_->getStreamUrl(streamId, ext);
+        SDL_Log("onOpenMovie: url=%s ext=%s title=%s", url.c_str(), ext.c_str(), title.c_str());
         playUrl(url, streamId, "", title);
     }
     void onOpenSeries(const std::string& seriesId) {
@@ -360,8 +427,29 @@ private:
         seriesScreen_->load(seriesId);
     }
 
-    void playUrl(const std::string& url, const std::string& itemId,
+    // Xtream /movie/<user>/<pass>/<id>.<ext> URLs 302 to a per-token CDN
+    // (e.g. http://5827994.nodivorn.cc/...?token=...). The webOS GStreamer
+    // playbin's HTTP source doesn't auto-follow the redirect here — it
+    // type-finds on the 302 body (empty) and bails with "Stream doesn't contain
+    // enough data". We resolve the final URL via libcurl and feed *that* to playbin.
+    // Don't pre-resolve remote URLs: Xtream CDN tokens are often single-use, so
+    // consuming the redirect via libcurl invalidates the token for playbin.
+    // We let playbin + souphttpsrc follow the 302 themselves (see source-setup
+    // hook in GstDecoder::open), and only rewrite local paths to file://.
+    static std::string resolveRedirect(const std::string& url) {
+        if (url.compare(0, 7, "http://")  == 0 ||
+            url.compare(0, 8, "https://") == 0 ||
+            url.compare(0, 7, "file://")  == 0) {
+            return url;
+        }
+        return "file://" + url;
+    }
+
+    void playUrl(const std::string& orig_url, const std::string& itemId,
                  const std::string& seriesId, const std::string& title) {
+        SDL_Log("playUrl: resolving redirect for %s", orig_url.c_str());
+        std::string url = resolveRedirect(orig_url);
+        SDL_Log("playUrl: effective url=%s", url.c_str());
         screen_ = Screen::Player;
         playerTitle_ = title;
         playerUrl_   = url;
@@ -378,14 +466,19 @@ private:
             copyPlane(latest_.v, f.v, f.v_stride, f.height / 2);
             latest_.dirty = true;
         });
+        SDL_Log("playUrl: calling decoder.open");
         if (!decoder_->open(url)) {
-            std::fprintf(stderr, "decoder.open(%s) failed: %s\n",
-                         url.c_str(), decoder_->lastError().c_str());
+            SDL_Log("decoder.open(%s) failed: %s", url.c_str(), decoder_->lastError().c_str());
             screen_ = Screen::Home;
             decoder_.reset();
             return;
         }
-        decoder_->play();
+        SDL_Log("playUrl: calling decoder.play");
+        if (!decoder_->play()) {
+            SDL_Log("decoder.play failed: %s", decoder_->lastError().c_str());
+        } else {
+            SDL_Log("playUrl: decoder.play returned true");
+        }
 
         // Resume saved position if any.
         double saved = iptv::store::WatchPosition::get(itemId);
@@ -419,11 +512,19 @@ private:
     }
 
     int loop() {
+        diag("loop() ENTERED\n");
         GMainContext* ctx = g_main_context_default();
         bool running = true;
+        int tick = 0;
+        diag("loop() before while\n");
         while (running) {
-            // Pump GLib (GstDecoder, AppLifecycle).
-            while (g_main_context_iteration(ctx, FALSE)) {}
+            // Pump GLib only while a GstDecoder is active — SDL-webOS otherwise
+            // floods the default context with Luna callbacks that livelock us.
+            // Capped at 4 iterations per frame so SDL events keep flowing.
+            if (decoder_) {
+                for (int i = 0; i < 4 && g_main_context_iteration(ctx, FALSE); ++i) {}
+            }
+            ++tick;
 
             SDL_Event ev;
             while (SDL_PollEvent(&ev)) {
@@ -438,6 +539,11 @@ private:
             }
 
             images_.pump();
+            // Re-read cache when the background sync flips the dirty flag.
+            if (catalog_dirty_.exchange(false) && screen_ == Screen::Home) {
+                SDL_Log("catalog dirty -> reloading HomeScreen");
+                home_->load();
+            }
             if (screen_ == Screen::Player && decoder_) {
                 if (savedPosition_ > 5 && decoder_->durationSeconds() > savedPosition_ + 5) {
                     decoder_->seekSeconds(savedPosition_);
@@ -474,28 +580,21 @@ private:
         if (!decoder_) return;
         handled = true;
         osd_->poke();
-        switch (k) {
-            case iptv::app::KEY::PLAY_PAUSE:
-            case iptv::app::KEY::PLAY:
-            case iptv::app::KEY::PAUSE:
-                if (osd_->isVisible() && /*paused*/ false) decoder_->play();
-                else decoder_->pause();
-                break;
-            case iptv::app::KEY::FF:
-                decoder_->seekRelative(+300); break;
-            case iptv::app::KEY::REW:
-                decoder_->seekRelative(-300); break;
-            case iptv::app::KEY::RIGHT:
-                decoder_->seekRelative(+10); break;
-            case iptv::app::KEY::LEFT:
-                decoder_->seekRelative(-10); break;
-            case iptv::app::KEY::STOP:
-                exitPlayer(); break;
-            default:
-                if (iptv::app::isBackKey(k) || iptv::app::isOkKey(k)) {
-                    handled = false;  // fall through to back handling
-                }
-                break;
+        if (k == iptv::app::KEY::PLAY_PAUSE) {
+            if (osd_->isVisible() && /*paused*/ false) decoder_->play();
+            else decoder_->pause();
+        } else if (k == iptv::app::KEY::FF) {
+            decoder_->seekRelative(+300);
+        } else if (k == iptv::app::KEY::REW) {
+            decoder_->seekRelative(-300);
+        } else if (k == iptv::app::KEY::RIGHT) {
+            decoder_->seekRelative(+10);
+        } else if (k == iptv::app::KEY::LEFT) {
+            decoder_->seekRelative(-10);
+        } else if (k == iptv::app::KEY::STOP) {
+            exitPlayer();
+        } else if (iptv::app::isBackKey(k) || iptv::app::isOkKey(k)) {
+            handled = false;  // fall through to back handling
         }
     }
 
@@ -568,16 +667,134 @@ private:
     int tex_w_ = 0, tex_h_ = 0;
     std::string playerTitle_, playerUrl_, playerItemId_, playerSeriesId_;
     double savedPosition_ = 0;
+
+    // Background catalog sync — kicks in on first launch when the cache is empty.
+    std::thread sync_thread_;
+    std::atomic<bool> sync_abort_{false};
+    std::atomic<bool> catalog_dirty_{false};
+    std::atomic<bool> sync_active_{false};
+    std::mutex sync_mu_;
+    std::string sync_phase_;
+    std::string sync_category_;
+    int sync_done_ = 0;
+    int sync_total_ = 0;
 };
 
 }  // namespace
 
+// UDP debug socket (PC dev = 192.168.1.242:5555). We mirror every SDL_Log + stderr
+// line over UDP so a crashing TV-side binary still leaves a trace.
+namespace {
+int g_diag_sock = -1;
+sockaddr_in g_diag_addr{};
+
+void diagInit() {
+    g_diag_sock = socket(AF_INET, SOCK_DGRAM, 0);
+    g_diag_addr.sin_family = AF_INET;
+    g_diag_addr.sin_port   = htons(5555);
+    inet_pton(AF_INET, "192.168.1.242", &g_diag_addr.sin_addr);
+}
+void diag(const char* fmt, ...) {
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    if (n >= (int)sizeof(buf)) n = sizeof(buf) - 1;
+    if (g_diag_sock >= 0) {
+        sendto(g_diag_sock, buf, n, 0, (sockaddr*)&g_diag_addr, sizeof(g_diag_addr));
+    }
+    std::fwrite(buf, 1, n, stderr);
+    std::fflush(stderr);
+}
+}  // namespace
+
+// Mirror SDL_Log to the remote UDP log so we see all runtime messages.
+static void sdlLogToUdp(void*, int /*category*/, SDL_LogPriority /*pri*/, const char* msg) {
+    diag("[sdl] %s\n", msg);
+}
+
+// If the user config file is missing and the IPK ships a default_config.json
+// next to the binary, import it once. Lets us pre-seed Xtream credentials for
+// test deployments without typing on a TV keyboard.
+static void seedDefaultConfigIfNeeded() {
+    auto userCfg = iptv::store::Paths::configFile();
+    if (std::filesystem::exists(userCfg)) return;
+    char* base = SDL_GetBasePath();
+    if (!base) return;
+    std::filesystem::path candidates[] = {
+        std::filesystem::path(base) / "assets/default_config.json",
+        std::filesystem::path(base) / "default_config.json",
+    };
+    SDL_free(base);
+    std::error_code ec;
+    for (const auto& src : candidates) {
+        if (!std::filesystem::exists(src)) continue;
+        std::filesystem::create_directories(userCfg.parent_path(), ec);
+        std::filesystem::copy_file(src, userCfg,
+            std::filesystem::copy_options::overwrite_existing, ec);
+        diag("seeded user config from %s (err=%s)\n",
+             src.string().c_str(), ec ? ec.message().c_str() : "ok");
+        return;
+    }
+}
+
 int main(int argc, char* argv[]) {
+    diagInit();
+    diag("==== iptv-player boot, argc=%d, pid=%d ====\n", argc, getpid());
+    for (int i = 0; i < argc; ++i) diag("  argv[%d]=%s\n", i, argv[i]);
+
+    // SDL-webOS reads APPID to register with SAM. Without it, SDL_Init succeeds but
+    // the compositor never raises our window over the splash, so the user keeps
+    // seeing splash.png until the process exits.
+    setenv("APPID", "com.iptv.player.native", 1);
+    diag("APPID=%s\n", getenv("APPID"));
+
+    // Tell GStreamer to also look in our bundled plugin dir (libgstlibav.so lives
+    // there) so avdec_mpeg4/h265/mpeg2video become available. Append to any
+    // existing path so system plugins still resolve.
+    {
+        char* base = SDL_GetBasePath();
+        if (base) {
+            std::string plugin_dir = std::string(base) + "lib/gstreamer-1.0";
+            const char* existing = getenv("GST_PLUGIN_PATH");
+            std::string merged = plugin_dir + (existing && *existing ? std::string(":") + existing : "");
+            setenv("GST_PLUGIN_PATH", merged.c_str(), 1);
+            // We also need the bundled ffmpeg/libstdc++ libs resolvable by dlopen'd
+            // plugins. The binary's rpath=$ORIGIN/lib covers libs it links directly,
+            // but libgstlibav.so's own NEEDED libs are resolved by the global loader.
+            std::string ld_path = std::string(base) + "lib";
+            const char* existing_ld = getenv("LD_LIBRARY_PATH");
+            std::string merged_ld = ld_path + (existing_ld && *existing_ld ? std::string(":") + existing_ld : "");
+            setenv("LD_LIBRARY_PATH", merged_ld.c_str(), 1);
+            SDL_free(base);
+            diag("GST_PLUGIN_PATH=%s\n", getenv("GST_PLUGIN_PATH"));
+            diag("LD_LIBRARY_PATH=%s\n", getenv("LD_LIBRARY_PATH"));
+        }
+    }
+
+    // Capture stdout/stderr to disk for post-mortem on the TV (SAM swallows them).
+    std::freopen("/tmp/iptv_native.log", "w", stderr);
+    std::setvbuf(stderr, nullptr, _IOLBF, 0);
+    // Tap SDL_Log so every internal message lands on the UDP stream.
+    SDL_LogSetOutputFunction(sdlLogToUdp, nullptr);
+    SDL_LogSetAllPriority(SDL_LOG_PRIORITY_VERBOSE);
+    diag("freopen stderr -> /tmp/iptv_native.log done\n");
+
     if (argc >= 2 && std::string(argv[1]) == "xtream") return xtreamTest(argc, argv);
     if (argc >= 2 && std::string(argv[1]) == "store")  return storeTest();
     if (argc >= 2 && std::string(argv[1]) == "sync")   return syncTest();
     if (argc >= 2 && std::string(argv[1]) == "play" && argc >= 3) return playFile(argv[2]);
-    if (argc >= 2 && argv[1][0] != '-') return playFile(argv[1]);  // legacy positional
+    // Only treat argv[1] as a file path when it's not a SAM-style JSON launch payload
+    // (SAM passes something like {"@system_native_app":true,...} as argv[1]).
+    if (argc >= 2 && argv[1][0] != '-' && argv[1][0] != '{') return playFile(argv[1]);
+    diag("dataDir=%s\n", iptv::store::Paths::dataDir().string().c_str());
+    seedDefaultConfigIfNeeded();
+    diag("launching GUI App\n");
     App app;
-    return app.run();
+    diag("App constructed, calling run()\n");
+    int rc = app.run();
+    diag("App.run() returned %d\n", rc);
+    return rc;
 }

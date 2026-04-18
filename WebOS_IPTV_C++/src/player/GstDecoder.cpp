@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include <SDL2/SDL_log.h>
+
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
 #include <gst/video/video.h>
@@ -12,7 +14,43 @@ namespace iptv {
 GstDecoder::GstDecoder() {
     static bool inited = false;
     if (!inited) {
+        setenv("GST_PLUGIN_FEATURE_RANK", "lxvideodec:NONE,dvbin:NONE", 1);
         gst_init(nullptr, nullptr);
+
+        // Also downrank LG's hardware decoders in the live registry — the env var
+        // is read at registry build time but some factories are registered after.
+        GstRegistry* reg = gst_registry_get();
+        for (const char* name : {"lxvideodec", "dvbin", "lxaudiodec", "lxvideodecmpeg4",
+                                  "lxvideodech264", "lxvideodech265"}) {
+            if (GstElementFactory* f = gst_element_factory_find(name)) {
+                gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(f), GST_RANK_NONE);
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] downrank %s -> NONE", name);
+                gst_object_unref(f);
+            }
+        }
+        // Boost software decoder ranks so decodebin picks them.
+        for (const char* name : {"avdec_mpeg4", "avdec_h264", "avdec_h265", "avdec_mpeg2video"}) {
+            if (GstElementFactory* f = gst_element_factory_find(name)) {
+                gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(f),
+                                             static_cast<guint>(GST_RANK_PRIMARY + 10));
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] boost %s rank", name);
+                gst_object_unref(f);
+            } else {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] %s not found on TV", name);
+            }
+        }
+        // Enumerate EVERY decoder the TV actually has so we know what else exists
+        // (useful to find lxvideodec sub-types like lxvp9, lxav1, etc.).
+        GList* list = gst_element_factory_list_get_elements(
+            GST_ELEMENT_FACTORY_TYPE_DECODER, GST_RANK_MARGINAL);
+        for (GList* l = list; l; l = l->next) {
+            auto* f = GST_ELEMENT_FACTORY(l->data);
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] decoder present: %s (rank=%u)",
+                        GST_OBJECT_NAME(f),
+                        gst_plugin_feature_get_rank(GST_PLUGIN_FEATURE(f)));
+        }
+        gst_plugin_feature_list_free(list);
+        (void)reg;
         inited = true;
     }
 }
@@ -100,7 +138,7 @@ bool GstDecoder::open(const std::string& path) {
         audio_resample_ = gst_element_factory_make("audioresample", "aresample");
         audio_sink_     = gst_element_factory_make("autoaudiosink", "asink");
         if (!audio_convert_ || !audio_resample_ || !audio_sink_) {
-            std::fprintf(stderr, "[gst] audio branch unavailable, video-only\n");
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio branch unavailable, video-only\n");
             if (audio_convert_)  gst_object_unref(audio_convert_);
             if (audio_resample_) gst_object_unref(audio_resample_);
             if (audio_sink_)     gst_object_unref(audio_sink_);
@@ -123,6 +161,26 @@ bool GstDecoder::open(const std::string& path) {
 
     std::string uri = toUri(path);
     g_object_set(pipeline_, "uri", uri.c_str(), nullptr);
+
+    // Configure the HTTP source when playbin spins it up (user-agent, cookies,
+    // timeouts). Xtream CDNs often reject default GStreamer UAs and require
+    // following a 302 that souphttpsrc handles itself if automatic-redirect is on.
+    g_signal_connect(pipeline_, "source-setup",
+        G_CALLBACK(+[](GstElement*, GstElement* source, gpointer) {
+            if (!source) return;
+            GObjectClass* cls = G_OBJECT_GET_CLASS(source);
+            if (g_object_class_find_property(cls, "user-agent")) {
+                g_object_set(source, "user-agent", "VLC/3.0.16 LibVLC/3.0.16", nullptr);
+            }
+            if (g_object_class_find_property(cls, "automatic-redirect")) {
+                g_object_set(source, "automatic-redirect", TRUE, nullptr);
+            }
+            if (g_object_class_find_property(cls, "timeout")) {
+                g_object_set(source, "timeout", 15u, nullptr);
+            }
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "[gst] source-setup on %s", GST_ELEMENT_NAME(source));
+        }), nullptr);
 
     GstBus* bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline_));
     bus_watch_id_ = gst_bus_add_watch(bus, &GstDecoder::onBusMessage, this);
@@ -278,7 +336,7 @@ int GstDecoder::onBusMessage(GstBus*, GstMessage* msg, gpointer user) {
     switch (GST_MESSAGE_TYPE(msg)) {
         case GST_MESSAGE_EOS:
             self->eos_ = true;
-            std::fprintf(stderr, "[gst] EOS\n");
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] EOS\n");
             break;
         case GST_MESSAGE_ERROR: {
             GError* err = nullptr;
@@ -286,7 +344,7 @@ int GstDecoder::onBusMessage(GstBus*, GstMessage* msg, gpointer user) {
             gst_message_parse_error(msg, &err, &dbg);
             self->last_error_ = err ? err->message : "unknown gst error";
             self->error_ = true;
-            std::fprintf(stderr, "[gst] ERROR: %s (%s)\n",
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] ERROR: %s (%s)\n",
                          err ? err->message : "?", dbg ? dbg : "");
             if (err) g_error_free(err);
             if (dbg) g_free(dbg);
@@ -296,7 +354,7 @@ int GstDecoder::onBusMessage(GstBus*, GstMessage* msg, gpointer user) {
             if (GST_MESSAGE_SRC(msg) == GST_OBJECT(self->pipeline_)) {
                 GstState oldS, newS;
                 gst_message_parse_state_changed(msg, &oldS, &newS, nullptr);
-                std::fprintf(stderr, "[gst] state %s -> %s\n",
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] state %s -> %s\n",
                              gst_element_state_get_name(oldS),
                              gst_element_state_get_name(newS));
             }

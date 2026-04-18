@@ -36,16 +36,24 @@ void PosterGrid::setItems(std::vector<GridItem> items) {
         focusIds_.push_back("grid_" + c.item.id);
         cells_.push_back(std::move(c));
     }
-    registerFocus();
     scroll_ = 0;
+    // Focus nodes are registered lazily via activate() when this grid becomes the
+    // visible tab — avoids paying O(N) to scan thousands of off-screen nodes on
+    // every arrow-key press.
+}
+
+void PosterGrid::activate() {
+    focus_.clear();
+    registerFocus();
+    if (!focusIds_.empty()) focus_.setFocus(focusIds_.front());
 }
 
 void PosterGrid::registerFocus() {
-    // Remove stale nodes with our prefix then re-add.
-    // FocusManager doesn't expose remove; we rely on the owning screen to clear
-    // focus state when setting a brand new grid, which is fine here because
-    // PosterGrid::setItems() is called after a screen transition.
-    for (std::size_t i = 0; i < cells_.size(); ++i) {
+    // Cap how many cells we register focus for — browsing tens of thousands of
+    // movies needs pagination/search, not an O(N) walk on every arrow press.
+    constexpr std::size_t kMaxFocusable = 500;
+    const std::size_t limit = std::min(cells_.size(), kMaxFocusable);
+    for (std::size_t i = 0; i < limit; ++i) {
         int col = static_cast<int>(i % cols_);
         int row = static_cast<int>(i / cols_);
         int cx = x_ + col * (cw_ + gap_);

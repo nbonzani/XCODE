@@ -38,6 +38,12 @@ public:
     void setItems(std::vector<GridItem> items);
     void setOnSelect(std::function<void(const GridItem&)> cb) { on_select_ = std::move(cb); }
 
+    // Re-register this grid's focus nodes on the shared FocusManager and put
+    // focus on the first cell. Called by HomeScreen when the user switches tab.
+    void activate();
+
+    bool empty() const { return cells_.empty(); }
+
     // Walk through the currently visible window and make sure posters are queued
     // for download. Call after setItems() and when scrolling.
     void prefetchVisible();
