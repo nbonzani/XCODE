@@ -146,6 +146,9 @@ void HomeScreen::render(SDL_Renderer* r, int winW, int winH) {
         x += w + 40;
     }
     text_.draw("[BLEU] Configuration", winW - 380, 110, {130, 130, 140, 255});
+    // Debug-only hint for the bundled test-video hotkeys.
+    text_.draw("[1] test MPEG-4 ASP  /  [2] test H.264",
+               60, winH - 40, {100, 100, 110, 255});
 
     PosterGrid* grid = gridMovies_.get();
     if (tab_ == Tab::Series)    grid = gridSeries_.get();

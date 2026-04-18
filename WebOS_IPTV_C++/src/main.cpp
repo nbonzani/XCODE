@@ -551,7 +551,13 @@ private:
                 }
                 osd_->setProgress(decoder_->positionSeconds(), decoder_->durationSeconds());
                 osd_->tick(SDL_GetTicks());
-                if (decoder_->eos() || decoder_->hasError()) exitPlayer();
+                if (decoder_->hasError()) {
+                    player_error_msg_ = decoder_->lastError().substr(0, 100);
+                    player_error_until_ = SDL_GetTicks() + 4000;
+                    exitPlayer();
+                } else if (decoder_->eos()) {
+                    exitPlayer();
+                }
             }
 
             render();
@@ -608,6 +614,40 @@ private:
             case Screen::Player:   renderPlayer(); break;
             default: break;
         }
+        if (sync_active_) renderSyncOverlay();
+        if (player_error_until_ > SDL_GetTicks()) renderPlayerError();
+    }
+
+    void renderSyncOverlay() {
+        // Bottom-right toast with the current sync phase and progress.
+        std::string phase, cat; int done = 0, total = 0;
+        {
+            std::lock_guard<std::mutex> lk(sync_mu_);
+            phase = sync_phase_;
+            cat   = sync_category_;
+            done  = sync_done_;
+            total = sync_total_;
+        }
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 200);
+        SDL_Rect box{kWidth - 540, kHeight - 120, 500, 80};
+        SDL_RenderFillRect(renderer_, &box);
+        text_.draw("Synchronisation du catalogue…", box.x + 16, box.y + 10, {230, 230, 230, 255});
+        char line[256];
+        std::snprintf(line, sizeof(line), "%s  %d/%d  %s",
+                      phase.c_str(), done, total, cat.c_str());
+        text_.draw(line, box.x + 16, box.y + 40, {180, 180, 190, 255});
+    }
+
+    void renderPlayerError() {
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 220);
+        SDL_Rect box{kWidth / 2 - 420, kHeight / 2 - 50, 840, 100};
+        SDL_RenderFillRect(renderer_, &box);
+        SDL_SetRenderDrawColor(renderer_, 220, 40, 40, 255);
+        SDL_RenderDrawRect(renderer_, &box);
+        text_.draw("Impossible de lire ce film", box.x + 24, box.y + 20, {240, 100, 100, 255});
+        text_.draw(player_error_msg_, box.x + 24, box.y + 55, {200, 200, 200, 255});
     }
 
     void renderPlayer() {
@@ -667,6 +707,9 @@ private:
     int tex_w_ = 0, tex_h_ = 0;
     std::string playerTitle_, playerUrl_, playerItemId_, playerSeriesId_;
     double savedPosition_ = 0;
+    // Transient error message shown in the player on decode failure.
+    uint32_t player_error_until_ = 0;
+    std::string player_error_msg_;
 
     // Background catalog sync — kicks in on first launch when the cache is empty.
     std::thread sync_thread_;
