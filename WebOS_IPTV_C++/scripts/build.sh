@@ -90,11 +90,20 @@ for lib in libavcodec.so.58 libavformat.so.58 libavutil.so.56 \
         bundle_so "$SYSROOT/usr/lib/$lib"
     fi
 done
-GST_PLUGIN_SRC="$HOME/webos-toolchain/gst-libav-1.16.3/build/ext/libav/.libs/libgstlibav.so"
-if [[ -f "$GST_PLUGIN_SRC" ]]; then
-    mkdir -p "$PACKAGE_DIR/lib/gstreamer-1.0"
-    cp "$GST_PLUGIN_SRC" "$PACKAGE_DIR/lib/gstreamer-1.0/libgstlibav.so"
-    echo "==> bundled gst-libav plugin"
+if [[ "${BUNDLE_GST_LIBAV:-1}" == "1" ]]; then
+    GST_PLUGIN_SRC="$HOME/webos-toolchain/gst-libav-1.16.3/build/ext/libav/.libs/libgstlibav.so"
+    if [[ -f "$GST_PLUGIN_SRC" ]]; then
+        mkdir -p "$PACKAGE_DIR/lib/gstreamer-1.0"
+        cp "$GST_PLUGIN_SRC" "$PACKAGE_DIR/lib/gstreamer-1.0/libgstlibav.so"
+        echo "==> bundled gst-libav plugin"
+    fi
+fi
+# GLib polyfill shim — provides g_once_init_*_pointer (added in GLib 2.80)
+# that webOS 6.5's older GLib lacks. NEEDED-injected into libgstlibav.so via
+# patchelf so the dynamic linker resolves it before loading the plugin.
+if [[ -f /tmp/libglib_compat.so ]]; then
+    cp /tmp/libglib_compat.so "$PACKAGE_DIR/lib/libglib_compat.so"
+    echo "==> bundled libglib_compat.so"
 fi
 echo "==> Bundled .so"
 ls -la "$PACKAGE_DIR/lib/" | head

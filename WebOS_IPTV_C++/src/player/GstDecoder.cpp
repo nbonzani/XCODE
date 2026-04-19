@@ -136,7 +136,26 @@ bool GstDecoder::open(const std::string& path) {
     if (audio_enabled_) {
         audio_convert_  = gst_element_factory_make("audioconvert",  "aconvert");
         audio_resample_ = gst_element_factory_make("audioresample", "aresample");
-        audio_sink_     = gst_element_factory_make("autoaudiosink", "asink");
+        // PulseAudio first; some TVs reject the clock so we force sync=FALSE
+        // and provide-clock=FALSE to keep the pipeline progressing if pulse
+        // is unhappy. Fall back to alsasink, then nothing (audio disabled).
+        audio_sink_ = gst_element_factory_make("pulsesink", "asink");
+        if (audio_sink_) {
+            g_object_set(audio_sink_,
+                         "sync",          FALSE,
+                         "provide-clock", FALSE,
+                         "async-handling", TRUE,
+                         nullptr);
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio sink: pulsesink (sync=FALSE)");
+        } else {
+            audio_sink_ = gst_element_factory_make("alsasink", "asink");
+            if (audio_sink_) {
+                g_object_set(audio_sink_, "sync", FALSE, nullptr);
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio sink: alsasink (sync=FALSE)");
+            } else {
+                audio_sink_ = gst_element_factory_make("autoaudiosink", "asink");
+            }
+        }
         if (!audio_convert_ || !audio_resample_ || !audio_sink_) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio branch unavailable, video-only\n");
             if (audio_convert_)  gst_object_unref(audio_convert_);
@@ -144,7 +163,7 @@ bool GstDecoder::open(const std::string& path) {
             if (audio_sink_)     gst_object_unref(audio_sink_);
             audio_convert_ = audio_resample_ = audio_sink_ = nullptr;
         } else {
-            g_object_set(audio_sink_, "sync", realtime_ ? TRUE : FALSE, nullptr);
+            // sync property is already set above per backend; don't override.
             audio_sink_bin_ = gst_bin_new("abin");
             gst_bin_add_many(GST_BIN(audio_sink_bin_),
                              audio_convert_, audio_resample_, audio_sink_, nullptr);
