@@ -261,6 +261,11 @@ class App {
 public:
     int run() {
         SDL_Log("App::run() entering");
+        // Ask SAM (via SDL-webOS) to deliver BACK / EXIT / HOME keys to us
+        // instead of consuming them itself (default behaviour: BACK exits app).
+        // Must be set BEFORE SDL_Init so SDL-webOS picks it up at registration.
+        SDL_SetHint("SDL_WEBOS_ACCESS_POLICY_KEYS_BACK", "true");
+        SDL_SetHint("SDL_WEBOS_ACCESS_POLICY_KEYS_EXIT", "true");
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) != 0) {
             SDL_Log("SDL_Init failed: %s", SDL_GetError());
             return 1;
@@ -520,14 +525,23 @@ private:
         while (running) {
             // Pump GLib only while a GstDecoder is active — SDL-webOS otherwise
             // floods the default context with Luna callbacks that livelock us.
-            // Capped at 4 iterations per frame so SDL events keep flowing.
+            // Cap is generous (32) because GStreamer fires many events per frame
+            // (probe queries + bus messages + new-sample) and a low cap leaves
+            // decoded frames stuck in the appsink queue → looks like a frozen
+            // first frame on screen.
             if (decoder_) {
-                for (int i = 0; i < 4 && g_main_context_iteration(ctx, FALSE); ++i) {}
+                for (int i = 0; i < 32 && g_main_context_iteration(ctx, FALSE); ++i) {}
             }
             ++tick;
 
             SDL_Event ev;
+            int polled = 0;
             while (SDL_PollEvent(&ev)) {
+                ++polled;
+                if (ev.type == SDL_KEYDOWN) {
+                    SDL_Log("POLLED KEYDOWN sym=%d scan=%d screen=%d",
+                            ev.key.keysym.sym, ev.key.keysym.scancode, (int)screen_);
+                }
                 if (ev.type == SDL_QUIT) running = false;
                 if (ev.type == SDL_KEYDOWN) {
                     int k = ev.key.keysym.sym;
@@ -536,6 +550,9 @@ private:
                 } else if (ev.type == SDL_TEXTINPUT && screen_ == Screen::Settings) {
                     settings_->handleText(ev.text.text);
                 }
+            }
+            if ((tick % 240) == 0 && polled == 0) {
+                SDL_Log("LOOP tick=%d polled=0 screen=%d", tick, (int)screen_);
             }
 
             images_.pump();
@@ -568,6 +585,10 @@ private:
 
     void handleKey(int k) {
         bool handled = false;
+        SDL_Log("KEY sym=%d (0x%x) screen=%d back?=%d ok?=%d",
+                k, k, (int)screen_,
+                iptv::app::isBackKey(k) ? 1 : 0,
+                iptv::app::isOkKey(k) ? 1 : 0);
         switch (screen_) {
             case Screen::Settings: settings_->handleKey(k, handled); break;
             case Screen::Home:     home_->handleKey(k, handled); break;
@@ -586,7 +607,16 @@ private:
         if (!decoder_) return;
         handled = true;
         osd_->poke();
-        if (k == iptv::app::KEY::PLAY_PAUSE) {
+        // OK / BACK / EXIT / STOP / color keys exit the player — SAM grabs
+        // most of these before we see them, so OK is the reliable fallback.
+        if (iptv::app::isOkKey(k) || iptv::app::isBackKey(k) ||
+            iptv::app::isExitKey(k) || k == iptv::app::KEY::STOP ||
+            k == iptv::app::KEY::RED || k == iptv::app::KEY::GREEN ||
+            k == iptv::app::KEY::YELLOW || k == iptv::app::KEY::BLUE) {
+            exitPlayer();
+            return;
+        }
+        if (k == iptv::app::KEY::PLAY_PAUSE || k == iptv::app::KEY::PAUSE) {
             if (osd_->isVisible() && /*paused*/ false) decoder_->play();
             else decoder_->pause();
         } else if (k == iptv::app::KEY::FF) {
@@ -597,10 +627,6 @@ private:
             decoder_->seekRelative(+10);
         } else if (k == iptv::app::KEY::LEFT) {
             decoder_->seekRelative(-10);
-        } else if (k == iptv::app::KEY::STOP) {
-            exitPlayer();
-        } else if (iptv::app::isBackKey(k) || iptv::app::isOkKey(k)) {
-            handled = false;  // fall through to back handling
         }
     }
 
@@ -757,6 +783,12 @@ void diag(const char* fmt, ...) {
 static void sdlLogToUdp(void*, int /*category*/, SDL_LogPriority /*pri*/, const char* msg) {
     diag("[sdl] %s\n", msg);
 }
+
+// GLib 2.80 added g_once_init_leave_pointer (alongside the long-existing
+// g_once_init_leave). On webOS 6.x's older GLib it doesn't exist. We provide
+// the shim in libglib_compat.so (bundled in the IPK) and patchelf NEEDED-add
+// it to libgstlibav.so — keeps the polyfill out of the main binary so the
+// modern GLib header macro doesn't conflict at compile time.
 
 // If the user config file is missing and the IPK ships a default_config.json
 // next to the binary, import it once. Lets us pre-seed Xtream credentials for

@@ -114,8 +114,10 @@ bool GstDecoder::open(const std::string& path) {
                  "caps",         caps,
                  "emit-signals", TRUE,
                  "sync",         realtime_ ? TRUE : FALSE,
-                 "max-buffers",  2,
-                 "drop",         FALSE,
+                 // drop late frames so audio doesn't drift ahead of a slow
+                 // software decoder; max 1 buffer keeps memory bounded.
+                 "max-buffers",  1,
+                 "drop",         realtime_ ? TRUE : FALSE,
                  nullptr);
     gst_caps_unref(caps);
     g_signal_connect(video_sink_, "new-sample", G_CALLBACK(&GstDecoder::onNewSample), this);
@@ -141,17 +143,20 @@ bool GstDecoder::open(const std::string& path) {
         // is unhappy. Fall back to alsasink, then nothing (audio disabled).
         audio_sink_ = gst_element_factory_make("pulsesink", "asink");
         if (audio_sink_) {
+            // sync=TRUE keeps audio aligned with PTS; provide-clock=FALSE means
+            // the pipeline picks its own clock (system) so a slow pulse doesn't
+            // stall everything. async-handling lets state changes proceed.
             g_object_set(audio_sink_,
-                         "sync",          FALSE,
-                         "provide-clock", FALSE,
+                         "sync",           TRUE,
+                         "provide-clock",  FALSE,
                          "async-handling", TRUE,
                          nullptr);
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio sink: pulsesink (sync=FALSE)");
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio sink: pulsesink (sync=TRUE)");
         } else {
             audio_sink_ = gst_element_factory_make("alsasink", "asink");
             if (audio_sink_) {
-                g_object_set(audio_sink_, "sync", FALSE, nullptr);
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio sink: alsasink (sync=FALSE)");
+                g_object_set(audio_sink_, "sync", TRUE, "provide-clock", FALSE, nullptr);
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio sink: alsasink");
             } else {
                 audio_sink_ = gst_element_factory_make("autoaudiosink", "asink");
             }

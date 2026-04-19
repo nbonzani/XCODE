@@ -77,9 +77,10 @@ void PlayerOSD::render(SDL_Renderer* r, int winW, int winH) {
     int rw = 0, rh = 0; text_.measure(right, rw, rh);
     text_.draw(right, tlX + tlW - rw, tlY + 16, {220, 220, 220, 255});
 
-    // Play/pause indicator bottom-left.
+    // Play/pause indicator bottom-left + exit hint.
     const char* state = state_.paused ? "PAUSE" : "PLAY";
     text_.draw(state, 40, winH - 52, {220, 220, 220, 255});
+    text_.draw("[OK] Retour", winW - 240, winH - 52, {180, 180, 180, 255});
 }
 
 }  // namespace iptv::ui

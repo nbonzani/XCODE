@@ -36,13 +36,13 @@ constexpr int STOP       = SDLK_AUDIOSTOP;
 constexpr int FF         = SDLK_AUDIOFASTFORWARD;
 constexpr int REW        = SDLK_AUDIOREWIND;
 
-// Color buttons — SDL has no standard keycode for them. On webOS they land on
-// SDLK_F1..F4 in some builds; we keep these as a best-effort default and adjust
-// after observing the actual key events (logged on startup).
-constexpr int RED    = SDLK_F1;
-constexpr int GREEN  = SDLK_F2;
-constexpr int YELLOW = SDLK_F3;
-constexpr int BLUE   = SDLK_F4;
+// Color buttons on the LG remote arrive as vendor scancodes 486-489; SDL
+// promotes an unknown scancode N to keysym (N | SDLK_SCANCODE_MASK).
+// Confirmed on webOS 6.5.3 / OLED C1 by logging ev.key.keysym.sym.
+constexpr int RED    = 486 | (1 << 30);  // SDLK_SCANCODE_MASK = 1 << 30
+constexpr int GREEN  = 487 | (1 << 30);
+constexpr int YELLOW = 488 | (1 << 30);
+constexpr int BLUE   = 489 | (1 << 30);
 
 // Numeric 0-9
 constexpr int NUM_0 = SDLK_0;
