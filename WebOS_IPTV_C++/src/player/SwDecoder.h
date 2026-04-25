@@ -39,6 +39,10 @@ public:
     // Hint codec audio : "ac3"|"eac3"|"aac"|"mp3" → chaîne parse+avdec_*
     // explicite ; sinon decodebin.
     void setAudioCodec(const std::string& c) { audio_codec_ = c; }
+    // Hint container : "mkv"|"avi"|"mp4" — utilisé quand l'URL Xtream est
+    // toujours .mkv mais le contenu réel diffère. Sans hint : sélection
+    // basée sur l'extension de l'URL (legacy).
+    void setContainer(const std::string& c) { container_ = c; }
 
     void setFrameCallback(FrameCb cb) { on_frame_ = std::move(cb); }
     bool hasError() const { return error_.load(); }
@@ -58,6 +62,7 @@ private:
     int start_seek_sec_ = 0;
     bool skip_audio_ = false;
     std::string audio_codec_;
+    std::string container_;
     FrameCb on_frame_;
     std::atomic<bool> error_{false};
     std::string last_error_;

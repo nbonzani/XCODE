@@ -95,8 +95,15 @@ bool SwDecoder::open(const std::string& uri, const std::string& codec) {
         src = "filesrc location=\"" + path + "\"";
     }
 
+    // Sélection du demux : container hint > extension URL.
+    // Sur Xtream l'URL est TOUJOURS .mkv même quand le contenu réel est avi/mp4
+    // — on demande donc le vrai container via setContainer() (récupéré de
+    // get_vod_info côté client). Sans hint, on retombe sur l'extension.
     const char* demux;
-    if (ends_with(".mp4") || ends_with(".m4v")) demux = "qtdemux";
+    if (container_ == "mp4" || container_ == "m4v") demux = "qtdemux";
+    else if (container_ == "avi")                   demux = "avidemux";
+    else if (container_ == "mkv" || container_ == "webm") demux = "matroskademux";
+    else if (ends_with(".mp4") || ends_with(".m4v")) demux = "qtdemux";
     else if (ends_with(".avi"))                 demux = "avidemux";
     else                                        demux = "matroskademux";
 

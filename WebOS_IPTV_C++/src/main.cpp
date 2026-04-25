@@ -670,18 +670,20 @@ private:
             std::string title = j.value("title", std::string{});
             std::string codec = j.value("codec", std::string{"auto"});
             std::string audio_codec = j.value("audio_codec", std::string{});
+            std::string container = j.value("container", std::string{});
             bool skip_audio = j.value("skip_audio", false);
             int seek_sec = j.value("seek_sec", 0);
             if (url.empty()) return;
-            SDL_Log("testbench cmd: streamUrl=%s codec=%s audio_codec=%s skip_audio=%d seek=%ds",
+            SDL_Log("testbench cmd: streamUrl=%s codec=%s audio_codec=%s container=%s skip_audio=%d seek=%ds",
                     url.c_str(), codec.c_str(), audio_codec.c_str(),
-                    (int)skip_audio, seek_sec);
+                    container.c_str(), (int)skip_audio, seek_sec);
             testbench_mode_ = true;
             exitPlayer();
             initial_stream_url_ = url;
             initial_stream_title_ = title;
             initial_stream_codec_ = codec;
             initial_stream_audio_codec_ = audio_codec;
+            initial_stream_container_ = container;
             initial_stream_skip_audio_ = skip_audio;
             initial_stream_seek_sec_ = seek_sec;
             pending_initial_play_ms_ = SDL_GetTicks() + 300;  // small settle
@@ -923,6 +925,7 @@ private:
             sw_->setStartSeek(initial_stream_seek_sec_);
             sw_->setSkipAudio(initial_stream_skip_audio_);
             sw_->setAudioCodec(initial_stream_audio_codec_);
+            sw_->setContainer(initial_stream_container_);
             sw_->setFrameCallback([this](const iptv::SwFrame& f) {
                 std::lock_guard<std::mutex> g(latest_.m);
                 latest_.width = f.width; latest_.height = f.height;
@@ -2112,6 +2115,7 @@ private:
     std::string initial_stream_title_;
     std::string initial_stream_codec_;   // "auto" | "h264" | "hevc" | "mpeg4" | "msmpeg4"
     std::string initial_stream_audio_codec_;  // "" | "ac3" | "eac3" | "aac" | "mp3" | "dts"
+    std::string initial_stream_container_;    // "" | "mkv" | "avi" | "mp4" — hint demux SwDecoder
     bool initial_stream_skip_audio_ = false;
     int initial_stream_seek_sec_ = 0;
     uint32_t pending_initial_play_ms_ = 0;  // 0 = no pending auto-play
