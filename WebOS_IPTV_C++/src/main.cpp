@@ -951,10 +951,9 @@ private:
                 osd_->setFilename(urlBasename(url));
                 osd_->setPlaylist(player_playlist_idx_,
                                   (int)player_playlist_.size());
-                // Arme le watchdog SW : si aucune frame dans les 5 s, le
-                // codec annoncé par Xtream est probablement faux (cas
-                // fréquent : "mpeg4" qui cache un HEVC) → fallback playbin.
-                sw_watchdog_at_ms_ = SDL_GetTicks() + 5000;
+                // Watchdog SW 12s : preroll MKV+avdec_mpeg4 sur HTTP peut
+                // prendre 5-10s. 5s déclenchait fallback systématique.
+                sw_watchdog_at_ms_ = SDL_GetTicks() + 12000;
                 playerSeedAudioTracks();
                 osd_->poke();
                 lifecycle_.acquireWakeLock("playback");
@@ -2284,6 +2283,10 @@ int main(int argc, char* argv[]) {
     setenv("GST_REGISTRY", "/tmp/iptv-gst-registry.bin", 1);
     setenv("GST_REGISTRY_FORK", "no", 1);
     setenv("GST_REGISTRY_UPDATE", "yes", 1);
+    // GStreamer scanne /usr/lib/gstreamer-1.0/ par défaut et trouve la
+    // libgstlibav.so de la TV qui prend précédence sur la nôtre malgré
+    // gst_plugin_load_file. On exclut explicitement TV's libgstlibav du
+    // registry via GST_PLUGIN_FEATURE_RANK ou GST_PLUGIN_PATH_1_0_NOTRAVERSE.
     // Verbose plugin loader so we see WHY libgstlibav.so is rejected if it is.
     // Output goes through stderr → /tmp/iptv_native.log on the TV.
     setenv("GST_DEBUG", "GST_PLUGIN_LOADING:5,GST_REGISTRY:4", 1);

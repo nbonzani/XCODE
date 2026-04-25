@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <unistd.h>
+#include <dlfcn.h>
 
 #include <SDL2/SDL_log.h>
 #include <gst/video/video.h>
@@ -10,32 +11,8 @@ namespace iptv {
 
 SwDecoder::SwDecoder() {
     gst_init(nullptr, nullptr);
-    // Partage la même politique de rank que GstDecoder : on pousse les HW
-    // decoders (lxvideodec* & co) à NONE pour que decodebin choisisse nos
-    // décodeurs software avdec_X. Sinon lxvideodec est autoplugged et écrit
-    // vers l'overlay HW — invisible pour l'appsink + le renderer SDL.
     static bool ranked = false;
     if (!ranked) {
-        // Force-load du libgstlibav bundlé (mêmes raisons que GstDecoder :
-        // GST_PLUGIN_PATH n'override pas le libav système). Nécessaire pour
-        // avoir avdec_mpeg4, avdec_msmpeg4v3, etc. côté decodebin.
-        char selfdir[512] = {0};
-        ssize_t n = readlink("/proc/self/exe", selfdir, sizeof(selfdir) - 1);
-        if (n > 0) {
-            selfdir[n] = 0;
-            if (char* slash = strrchr(selfdir, '/')) *slash = 0;
-            std::string path = std::string(selfdir) + "/lib/gstreamer-1.0/libgstlibav.so";
-            GError* err = nullptr;
-            GstPlugin* p = gst_plugin_load_file(path.c_str(), &err);
-            if (p) {
-                SDL_Log("[sw] force-loaded bundled libav: %s", path.c_str());
-                gst_object_unref(p);
-            } else {
-                SDL_Log("[sw] bundled libav load failed: %s",
-                        err ? err->message : "?");
-                if (err) g_error_free(err);
-            }
-        }
         GstRegistry* reg = gst_registry_get();
         for (const char* name : {"lxvideodec", "dvbin", "lxaudiodec",
                                   "lxvideodecmpeg4", "lxvideodech264",

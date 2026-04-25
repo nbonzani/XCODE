@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstring>
 #include <unistd.h>
+#include <dlfcn.h>
 
 #include <SDL2/SDL_log.h>
 #include <SDL2/SDL_timer.h>
@@ -33,25 +34,12 @@ bool NdlDecoder::init(const std::string& appId) {
     // qu'avec crackle / buffer-size errors. avdec_* sort du F32LE non-
     // interleaved avec channel-mask correct → audioconvert downmixe
     // proprement en stéréo pour pulsesink.
+    // Pas de force-load libgstlibav ici : ça casse NDL (libavcodec FFmpeg 4.4
+    // bundled vs 4.0 TV requise par libndl-media). DivX MPEG-4 ASP ne marchera
+    // que si l'utilisateur réencode en H.264 — compromis assumé v0.1.0.
     static bool libav_loaded = false;
     if (!libav_loaded) {
         libav_loaded = true;
-        char selfdir[512] = {0};
-        ssize_t n = readlink("/proc/self/exe", selfdir, sizeof(selfdir) - 1);
-        if (n > 0) {
-            selfdir[n] = 0;
-            if (char* slash = strrchr(selfdir, '/')) *slash = 0;
-            std::string path = std::string(selfdir) + "/lib/gstreamer-1.0/libgstlibav.so";
-            GError* err = nullptr;
-            GstPlugin* p = gst_plugin_load_file(path.c_str(), &err);
-            if (p) {
-                SDL_Log("[ndl] force-loaded bundled libav: %s", path.c_str());
-                gst_object_unref(p);
-            } else {
-                SDL_Log("[ndl] libav load failed: %s", err ? err->message : "?");
-                if (err) g_error_free(err);
-            }
-        }
         // Pre-load le plugin lxaudiodec pour que ses factories soient
         // disponibles avant le downrank (sinon gst_element_factory_find
         // retourne NULL et le downrank ne prend pas effet).
