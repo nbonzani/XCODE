@@ -1461,8 +1461,16 @@ private:
         if (osd_ && osd_->inBtnMode()) {
             if (k == KEY::LEFT)  { osd_->btnMove(-1); return; }
             if (k == KEY::RIGHT) { osd_->btnMove(+1); return; }
-            if (k == KEY::UP || iptv::app::isBackKey(k)) {
-                osd_->exitBtnMode(); return;
+            // UP : sortir du btn mode ET cacher l'OSD (cohérent avec lecture
+            // mode où UP cache aussi l'OSD).
+            if (k == KEY::UP) {
+                osd_->exitBtnMode();
+                osd_->hideNow();
+                return;
+            }
+            if (iptv::app::isBackKey(k)) {
+                osd_->exitBtnMode();
+                return;
             }
             if (iptv::app::isOkKey(k)) {
                 dispatchPlayerAction(osd_->btnActivate());

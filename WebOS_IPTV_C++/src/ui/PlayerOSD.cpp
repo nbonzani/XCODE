@@ -1,7 +1,9 @@
 #include "ui/PlayerOSD.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 #include <SDL2/SDL.h>
 
@@ -104,7 +106,9 @@ std::vector<PlayerAction> PlayerOSD::visibleButtons() const {
     out.push_back(PlayerAction::SeekFwd30);
     out.push_back(PlayerAction::SeekFwd5m);
     if (hasPlaylist()) out.push_back(PlayerAction::Next);
-    if (hasAudio())    out.push_back(PlayerAction::OpenAudio);
+    // OpenAudio bouton n'a de sens qu'avec ≥2 pistes : pas la peine d'afficher
+    // un menu où on ne peut rien choisir. Si 0 ou 1 piste → on cache.
+    if (state_.audioLabels.size() > 1) out.push_back(PlayerAction::OpenAudio);
     if (hasSubs())     out.push_back(PlayerAction::OpenSub);
     out.push_back(PlayerAction::ToggleMute);
     out.push_back(PlayerAction::Close);
@@ -409,9 +413,10 @@ void PlayerOSD::renderBar(SDL_Renderer* r, int winW, int winH) {
                 break;
             }
             case PlayerAction::ToggleMute:
-                // Labels texte : les emoji 🔊/🔇 (U+1F50A/U+1F507) ne sont
-                // pas dans le TTF embarqué.
-                label = state_.muted ? "MUET" : "SON"; break;
+                // Icône dessinée (cf. plus bas) — pas de texte. Le placeholder
+                // " " évite de centrer le texte (lw=0) ; le rendu réel est
+                // intercepté plus bas avec une early-return après l'icône.
+                label = " "; break;
             case PlayerAction::Close:
                 label = "X"; break;   // X ASCII, ✕ (U+2715) absent du TTF
             default: label = "?"; break;
@@ -427,6 +432,55 @@ void PlayerOSD::renderBar(SDL_Renderer* r, int winW, int winH) {
             case PlayerAction::SeekFwd5m: fs = theme::FontStyle::SmBold; break;
             default:                       fs = theme::FontStyle::LgBold; break;
         }
+        // Cas spécial ToggleMute : pas de texte, on dessine une icône
+        // haut-parleur (avec ou sans barre selon mute) en SDL primitives
+        // — le TTF embarqué n'inclut pas les emoji 🔊 / 🔇.
+        if (a == PlayerAction::ToggleMute) {
+            SDL_Color iconCol = focus
+                ? SDL_Color{255, 255, 255, 255}
+                : SDL_Color{0xcc, 0xe4, 0xff, 255};
+            const int cx = rc.x + rc.w / 2;
+            const int cy = rc.y + rc.h / 2;
+            // Base trapézoïdale du haut-parleur (fond + cône stylisé).
+            // Coordonnées : centre logique en (0,0), span ±18 px horizontal.
+            // Caisse rectangulaire à gauche.
+            SDL_SetRenderDrawColor(r, iconCol.r, iconCol.g, iconCol.b, iconCol.a);
+            SDL_Rect box{cx - 14, cy - 4, 6, 9};
+            SDL_RenderFillRect(r, &box);
+            // Cône (pavillon) : 4 lignes formant un trapèze plein.
+            // Approche simple : SDL_RenderFillRect à plusieurs hauteurs.
+            for (int dy = -10; dy <= 10; ++dy) {
+                int span = 8 - std::abs(dy) * 6 / 10;
+                if (span < 0) span = 0;
+                SDL_RenderDrawLine(r, cx - 8, cy + dy,
+                                      cx - 8 + span, cy + dy);
+            }
+            // Arcs de son (3 traits courbes courts) — uniquement si non muet.
+            if (!state_.muted) {
+                for (int k = 0; k < 3; ++k) {
+                    int rad = 5 + k * 5;
+                    // Petite portion d'arc à droite : on dessine 5 segments.
+                    for (int t = -30; t <= 30; t += 6) {
+                        float a0 = (float)t        * 3.14159f / 180.0f;
+                        float a1 = (float)(t + 6)  * 3.14159f / 180.0f;
+                        int x0 = cx + 4 + (int)(rad * std::cos(a0));
+                        int y0 = cy     + (int)(rad * std::sin(a0));
+                        int x1 = cx + 4 + (int)(rad * std::cos(a1));
+                        int y1 = cy     + (int)(rad * std::sin(a1));
+                        SDL_RenderDrawLine(r, x0, y0, x1, y1);
+                    }
+                }
+            } else {
+                // Barre oblique rouge ↘ pour indiquer mute.
+                SDL_SetRenderDrawColor(r, 0xff, 0x60, 0x60, 255);
+                for (int o = 0; o < 3; ++o) {
+                    SDL_RenderDrawLine(r, cx - 16, cy - 12 + o,
+                                          cx + 16, cy + 12 + o);
+                }
+            }
+            return;  // skip text render
+        }
+
         int lw = 0, lh = 0;
         text_.measure(fs, label, lw, lh);
         // Texte blanc pur si focus, bleu clair sinon — accentue la LED.
