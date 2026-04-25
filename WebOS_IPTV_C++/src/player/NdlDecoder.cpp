@@ -34,12 +34,36 @@ bool NdlDecoder::init(const std::string& appId) {
     // qu'avec crackle / buffer-size errors. avdec_* sort du F32LE non-
     // interleaved avec channel-mask correct → audioconvert downmixe
     // proprement en stéréo pour pulsesink.
-    // Pas de force-load libgstlibav ici : ça casse NDL (libavcodec FFmpeg 4.4
-    // bundled vs 4.0 TV requise par libndl-media). DivX MPEG-4 ASP ne marchera
-    // que si l'utilisateur réencode en H.264 — compromis assumé v0.1.0.
+    // Force-load notre libgstlibaviptv.so (plugin name "libaviptv") qui linke
+    // contre libavcodec-iptv.so.58 (FFmpeg 4.4 sans check anti-DivX). Soname
+    // custom évite tout clash avec libavcodec.so.58 (4.0) de la TV utilisée
+    // par NDL_DirectMediaLoad. Notre lib charge en parallèle, isolement total.
     static bool libav_loaded = false;
     if (!libav_loaded) {
         libav_loaded = true;
+        // Évincer libav TV (qui rejette DivX) avant de charger libaviptv
+        GstRegistry* reg0 = gst_registry_get();
+        if (GstPlugin* old = gst_registry_find_plugin(reg0, "libav")) {
+            gst_registry_remove_plugin(reg0, old);
+            gst_object_unref(old);
+            SDL_Log("[ndl] evicted TV libav plugin");
+        }
+        char selfdir[512] = {0};
+        ssize_t n = readlink("/proc/self/exe", selfdir, sizeof(selfdir) - 1);
+        if (n > 0) {
+            selfdir[n] = 0;
+            if (char* slash = strrchr(selfdir, '/')) *slash = 0;
+            std::string path = std::string(selfdir) + "/lib/gstreamer-1.0/libgstlibaviptv.so";
+            GError* err = nullptr;
+            GstPlugin* p = gst_plugin_load_file(path.c_str(), &err);
+            if (p) {
+                SDL_Log("[ndl] force-loaded gst-libav-iptv: %s", path.c_str());
+                gst_object_unref(p);
+            } else {
+                SDL_Log("[ndl] gst-libav-iptv load failed: %s", err ? err->message : "?");
+                if (err) g_error_free(err);
+            }
+        }
         // Pre-load le plugin lxaudiodec pour que ses factories soient
         // disponibles avant le downrank (sinon gst_element_factory_find
         // retourne NULL et le downrank ne prend pas effet).

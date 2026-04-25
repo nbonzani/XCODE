@@ -29,7 +29,7 @@ GstDecoder::GstDecoder() {
             if (n > 0) {
                 selfdir[n] = 0;
                 if (char* slash = strrchr(selfdir, '/')) *slash = 0;
-                std::string path = std::string(selfdir) + "/lib/gstreamer-1.0/libgstlibav.so";
+                std::string path = std::string(selfdir) + "/lib/gstreamer-1.0/libgstlibaviptv.so";
                 GError* err = nullptr;
                 GstPlugin* p = gst_plugin_load_file(path.c_str(), &err);
                 if (p) {

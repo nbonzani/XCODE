@@ -13,6 +13,31 @@ SwDecoder::SwDecoder() {
     gst_init(nullptr, nullptr);
     static bool ranked = false;
     if (!ranked) {
+        // Évincer libav TV (qui rejette DivX) AVANT de charger libaviptv
+        // pour éviter conflit de factory names avdec_mpeg4 etc.
+        GstRegistry* reg0 = gst_registry_get();
+        if (GstPlugin* old = gst_registry_find_plugin(reg0, "libav")) {
+            gst_registry_remove_plugin(reg0, old);
+            gst_object_unref(old);
+            SDL_Log("[sw] evicted TV libav plugin");
+        }
+        // Force-load notre libgstlibaviptv.so (FFmpeg 4.4 sans check anti-DivX)
+        char selfdir[512] = {0};
+        ssize_t nr = readlink("/proc/self/exe", selfdir, sizeof(selfdir) - 1);
+        if (nr > 0) {
+            selfdir[nr] = 0;
+            if (char* slash = strrchr(selfdir, '/')) *slash = 0;
+            std::string path = std::string(selfdir) + "/lib/gstreamer-1.0/libgstlibaviptv.so";
+            GError* err = nullptr;
+            GstPlugin* p = gst_plugin_load_file(path.c_str(), &err);
+            if (p) {
+                SDL_Log("[sw] force-loaded gst-libav-iptv");
+                gst_object_unref(p);
+            } else {
+                SDL_Log("[sw] gst-libav-iptv load failed: %s", err ? err->message : "?");
+                if (err) g_error_free(err);
+            }
+        }
         GstRegistry* reg = gst_registry_get();
         for (const char* name : {"lxvideodec", "dvbin", "lxaudiodec",
                                   "lxvideodecmpeg4", "lxvideodech264",
@@ -89,7 +114,10 @@ bool SwDecoder::open(const std::string& uri, const std::string& codec) {
                  "video/x-raw,format=I420 ! "
                  "appsink name=vsink emit-signals=true sync=true max-buffers=4 drop=false";
     } else {  // mpeg4 ASP / SP
-        vchain = "queue ! mpeg4vparse ! avdec_mpeg4 ! videoconvert ! "
+        // Pas de parser : matroska/avi/mp4 fournissent déjà le codec_data adéquat
+        // au décodeur. mpeg4vparse était un alias non résolu sur webOS 6.5
+        // (factory réelle = mpeg4videoparse), parse_launch le droppait silencieusement.
+        vchain = "queue ! avdec_mpeg4 ! videoconvert ! "
                  "video/x-raw,format=I420 ! "
                  "appsink name=vsink emit-signals=true sync=true max-buffers=4 drop=false";
     }
@@ -138,6 +166,114 @@ bool SwDecoder::open(const std::string& uri, const std::string& codec) {
         g_signal_connect(vsink, "new-sample",
                          G_CALLBACK(&SwDecoder::onVideoSampleStatic), this);
         gst_object_unref(vsink);
+    }
+
+    // Pour mpeg4 ASP : pad probe sur la sortie de mpeg4vparse pour patcher
+    // le codec_data (extradata) en supprimant le marqueur "DivX" qui fait
+    // crasher avdec_mpeg4 de la TV (FFmpeg 4.0 a un check anti-DivX
+    // historique : `mpeg4 video DivX in extradata! Stop decode due to DivX
+    // license`). On remplace les 4 octets ASCII "DivX" par "Xviv" → ffmpeg
+    // ne reconnaît plus le marqueur et procède au décodage normalement.
+    // Pad probe sur sortie mpeg4vparse pour neutraliser les marqueurs DivX
+    // dans codec_data (caps) ET dans chaque buffer. ffmpeg/libavcodec 4.0
+    // de la TV refuse de décoder si "DivX" est trouvé en extradata ou en
+    // user_data (check anti-DivX historique). On remplace les 4 octets
+    // "DivX" par "Xviv" en mémoire — le décodeur ne reconnaît plus le
+    // marqueur et procède au décodage normal.
+    if (codec == "mpeg4" || codec == "msmpeg4" || codec == "msmpeg4v3") {
+        // Iterate through bin to find mpeg4vparse element by class name
+        GstElement* parse = nullptr;
+        GstIterator* it = gst_bin_iterate_elements(GST_BIN(pipeline_));
+        GValue v = G_VALUE_INIT;
+        while (gst_iterator_next(it, &v) == GST_ITERATOR_OK) {
+            GstElement* e = GST_ELEMENT(g_value_get_object(&v));
+            const gchar* name = GST_OBJECT_NAME(e);
+            SDL_Log("[sw] pipeline element: %s", name ? name : "?");
+            if (name && strstr(name, "mpeg4vparse")) {
+                parse = GST_ELEMENT(g_object_ref(e));
+            }
+            g_value_reset(&v);
+        }
+        g_value_unset(&v);
+        gst_iterator_free(it);
+        SDL_Log("[sw] mpeg4vparse: %s", parse ? GST_OBJECT_NAME(parse) : "NOT FOUND");
+        if (parse) {
+            GstPad* srcpad = gst_element_get_static_pad(parse, "src");
+            if (srcpad) {
+                auto patch_divx = [](GstBuffer* buf) -> int {
+                    GstMapInfo m;
+                    if (!gst_buffer_map(buf, &m, GST_MAP_WRITE)) return 0;
+                    int patched = 0;
+                    for (gsize i = 0; i + 4 <= m.size; ++i) {
+                        if (m.data[i]=='D' && m.data[i+1]=='i' &&
+                            m.data[i+2]=='v' && m.data[i+3]=='X') {
+                            m.data[i]='X'; m.data[i+1]='v';
+                            m.data[i+2]='i'; m.data[i+3]='v';
+                            patched++;
+                        }
+                    }
+                    gst_buffer_unmap(buf, &m);
+                    return patched;
+                };
+                gst_pad_add_probe(srcpad,
+                    (GstPadProbeType)(GST_PAD_PROBE_TYPE_BUFFER |
+                                      GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM),
+                    +[](GstPad*, GstPadProbeInfo* info, gpointer user) -> GstPadProbeReturn {
+                        auto* patch = static_cast<std::function<int(GstBuffer*)>*>(user);
+                        if (info->type & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
+                            GstEvent* ev = GST_PAD_PROBE_INFO_EVENT(info);
+                            if (GST_EVENT_TYPE(ev) != GST_EVENT_CAPS) return GST_PAD_PROBE_OK;
+                            GstCaps* caps = nullptr;
+                            gst_event_parse_caps(ev, &caps);
+                            if (!caps) return GST_PAD_PROBE_OK;
+                            // Caps writeable copy
+                            GstCaps* w = gst_caps_make_writable(gst_caps_copy(caps));
+                            GstStructure* s = gst_caps_get_structure(w, 0);
+                            const GValue* cdv = gst_structure_get_value(s, "codec_data");
+                            if (cdv) {
+                                GstBuffer* cd = gst_value_get_buffer(cdv);
+                                if (cd) {
+                                    GstBuffer* cdcopy = gst_buffer_copy(cd);
+                                    int n = (*patch)(cdcopy);
+                                    if (n > 0) {
+                                        SDL_Log("[sw] DivX strip codec_data %d occ", n);
+                                        GValue v = G_VALUE_INIT;
+                                        g_value_init(&v, GST_TYPE_BUFFER);
+                                        gst_value_set_buffer(&v, cdcopy);
+                                        gst_structure_set_value(s, "codec_data", &v);
+                                        g_value_unset(&v);
+                                    }
+                                    gst_buffer_unref(cdcopy);
+                                }
+                            }
+                            // Replace event with patched caps
+                            GstEvent* nev = gst_event_new_caps(w);
+                            gst_caps_unref(w);
+                            gst_event_unref(ev);
+                            GST_PAD_PROBE_INFO_DATA(info) = nev;
+                        } else if (info->type & GST_PAD_PROBE_TYPE_BUFFER) {
+                            GstBuffer* buf = GST_PAD_PROBE_INFO_BUFFER(info);
+                            // Make writable
+                            GstBuffer* wbuf = gst_buffer_make_writable(buf);
+                            int n = (*patch)(wbuf);
+                            if (n > 0) {
+                                static int total = 0; total++;
+                                if (total <= 3 || total % 100 == 0)
+                                    SDL_Log("[sw] DivX strip buf #%d (%d occ)", total, n);
+                            }
+                            GST_PAD_PROBE_INFO_DATA(info) = wbuf;
+                        }
+                        return GST_PAD_PROBE_OK;
+                    },
+                    new std::function<int(GstBuffer*)>(patch_divx),
+                    +[](gpointer p){
+                        delete static_cast<std::function<int(GstBuffer*)>*>(p);
+                    });
+                gst_object_unref(srcpad);
+                SDL_Log("[sw] DivX-strip pad probe armed on mpeg4vparse");
+            }
+            gst_object_unref(parse);
+        }
     }
 
     // Bus watcher identique au NdlDecoder : state transitions + warnings +

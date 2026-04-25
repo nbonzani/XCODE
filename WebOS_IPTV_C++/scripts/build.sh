@@ -85,29 +85,35 @@ if [[ -f "$SYSROOT/lib/libgcc_s.so.1" ]]; then
     bundle_so "$SYSROOT/lib/libgcc_s.so.1"
 fi
 
-# FFmpeg + gst-libav bundle: the TV doesn't ship avdec_mpeg4/h265/mpeg2video so we
-# carry our own. libgstlibav.so goes under lib/gstreamer-1.0/ and is discovered via
-# GST_PLUGIN_PATH set at runtime in main.cpp.
-for lib in libavcodec.so.58 libavformat.so.58 libavutil.so.56 \
-           libswresample.so.3 libswscale.so.5 libavfilter.so.7; do
-    if [[ -f "$SYSROOT/usr/lib/$lib" ]]; then
-        bundle_so "$SYSROOT/usr/lib/$lib"
+# FFmpeg-IPTV + gst-libav-iptv bundle : sonames custom (-iptv) pour éviter
+# le clash avec libavcodec.so.58 native TV qui rejette les fichiers DivX.
+# Notre libavcodec-iptv.so.58 (FFmpeg 4.4) coexiste avec celle de la TV ;
+# notre plugin gst-libav-iptv (libgstlibaviptv.so) la référence via NEEDED.
+FFMPEG_IPTV=/tmp/ffmpeg-iptv-install/opt/ffmpeg-iptv/lib
+for lib in libavcodec-iptv.so.58 libavformat-iptv.so.58 libavutil-iptv.so.56 \
+           libswresample-iptv.so.3 libswscale-iptv.so.5 libavfilter-iptv.so.7; do
+    if [[ -f "$FFMPEG_IPTV/$lib" ]]; then
+        bundle_so "$FFMPEG_IPTV/$lib"
     fi
 done
-if [[ "${BUNDLE_GST_LIBAV:-1}" == "1" ]]; then
-    GST_PLUGIN_SRC="$HOME/webos-toolchain/gst-libav-1.16.3/build/ext/libav/.libs/libgstlibav.so"
-    if [[ -f "$GST_PLUGIN_SRC" ]]; then
-        mkdir -p "$PACKAGE_DIR/lib/gstreamer-1.0"
-        cp "$GST_PLUGIN_SRC" "$PACKAGE_DIR/lib/gstreamer-1.0/libgstlibav.so"
-        echo "==> bundled gst-libav plugin"
-    fi
+GST_PLUGIN_SRC="$HOME/webos-toolchain/gst-libav-1.16.3/build-iptv/ext/libav/.libs/libgstlibaviptv.so"
+if [[ -f "$GST_PLUGIN_SRC" ]]; then
+    mkdir -p "$PACKAGE_DIR/lib/gstreamer-1.0"
+    cp "$GST_PLUGIN_SRC" "$PACKAGE_DIR/lib/gstreamer-1.0/libgstlibaviptv.so"
+    echo "==> bundled gst-libav-iptv plugin"
 fi
 # GLib polyfill shim — provides g_once_init_*_pointer (added in GLib 2.80)
-# that webOS 6.5's older GLib lacks. NEEDED-injected into libgstlibav.so via
-# patchelf so the dynamic linker resolves it before loading the plugin.
+# that webOS 6.5's older GLib lacks. NEEDED-injected into libgstlibaviptv.so
+# via patchelf so the dynamic linker resolves it before loading the plugin.
 if [[ -f /tmp/libglib_compat.so ]]; then
     cp /tmp/libglib_compat.so "$PACKAGE_DIR/lib/libglib_compat.so"
     echo "==> bundled libglib_compat.so"
+    # Inject NEEDED libglib_compat.so into the gst-libav-iptv plugin
+    PATCHELF=$(which patchelf 2>/dev/null)
+    if [[ -n "$PATCHELF" && -f "$PACKAGE_DIR/lib/gstreamer-1.0/libgstlibaviptv.so" ]]; then
+        $PATCHELF --add-needed libglib_compat.so "$PACKAGE_DIR/lib/gstreamer-1.0/libgstlibaviptv.so"
+        echo "==> patchelf NEEDED libglib_compat.so on libgstlibaviptv.so"
+    fi
 fi
 echo "==> Bundled .so"
 ls -la "$PACKAGE_DIR/lib/" | head
