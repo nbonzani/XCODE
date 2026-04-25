@@ -99,20 +99,26 @@ void PosterGrid::prefetchVisible() {
 }
 
 void PosterGrid::ensureFocusedVisible() {
-    const auto& focusedId = focus_.focused();
+    const std::string focusedId = focus_.focused();
     auto it = std::find(focusIds_.begin(), focusIds_.end(), focusedId);
     if (it == focusIds_.end()) return;
     std::size_t idx = static_cast<std::size_t>(std::distance(focusIds_.begin(), it));
     int row = static_cast<int>(idx / cols_);
     int topPx = row * (ch_ + gap_);
     int bottomPx = topPx + ch_;
+    int oldScroll = scroll_;
     if (topPx < scroll_) {
         scroll_ = topPx;
     } else if (bottomPx > scroll_ + h_) {
         scroll_ = bottomPx - h_;
     }
-    // Re-register focus rects with the new scroll offset.
-    registerFocus();
+    // Only re-register on scroll change — every-frame re-register without clearing
+    // accumulates stale duplicate FocusNodes and breaks spatial navigation.
+    if (scroll_ != oldScroll) {
+        focus_.clear();
+        registerFocus();
+        focus_.setFocus(focusedId);
+    }
 }
 
 void PosterGrid::render(SDL_Renderer* renderer, const std::string& focusedId) {

@@ -224,7 +224,47 @@ static std::vector<Category> parseCategories(const json& arr) {
 }
 
 std::vector<Category> XtreamClient::getVodCategories() {
-    return parseCategories(getJson({{"action", "get_vod_categories"}}));
+    auto cats = parseCategories(getJson({{"action", "get_vod_categories"}}));
+    // Fallback panel_api : certains serveurs Xtream renvoient [] sur
+    // get_vod_categories mais exposent bien la liste dans panel_api.php.
+    if (cats.empty()) {
+        try {
+            auto panel = getPanelCategories();
+            cats = std::move(panel.movies);
+        } catch (...) { /* on garde l'empty */ }
+    }
+    return cats;
+}
+
+XtreamClient::PanelCategories XtreamClient::getPanelCategories() {
+    // panel_api.php renvoie {user_info, server_info, categories:{live,movie,series}, available_channels}.
+    // On ne l'utilise que pour extraire les 3 listes de catégories qui sont
+    // en général renvoyées même quand player_api.php?action=get_*_categories
+    // retourne vide (bug serveur observé en production).
+    // Payload ≈ 80 MB : on cache le résultat en mémoire de la session pour
+    // ne pas télécharger deux fois (une fois par getVodCategories + une fois
+    // par getSeriesCategories).
+    if (panel_loaded_) return panel_cache_;
+    PanelCategories out;
+    // Construit l'URL en changeant player_api.php → panel_api.php.
+    std::string oldApi = apiUrl_;
+    std::string panelApi = baseUrl_ + "/panel_api.php";
+    apiUrl_ = panelApi;
+    json data;
+    // panel_api.php renvoie potentiellement 50-100 MB (tout le catalogue
+    // dont available_channels). Timeout généreux : 2 min sur connexion
+    // lente, sinon la sync échoue alors que la réponse est en cours.
+    try { data = getJson({}, std::chrono::milliseconds(120000)); }
+    catch (...) { apiUrl_ = oldApi; throw; }
+    apiUrl_ = oldApi;
+    if (!data.is_object()) return out;
+    auto cats = data.value("categories", json::object());
+    if (auto it = cats.find("movie"); it != cats.end())  out.movies = parseCategories(*it);
+    if (auto it = cats.find("series"); it != cats.end()) out.series = parseCategories(*it);
+    if (auto it = cats.find("live"); it != cats.end())   out.live   = parseCategories(*it);
+    panel_cache_ = out;
+    panel_loaded_ = true;
+    return out;
 }
 
 std::vector<Movie> XtreamClient::getVodStreams(const std::string& categoryId) {
@@ -260,7 +300,14 @@ json XtreamClient::getVodInfo(const std::string& vodId) {
 }
 
 std::vector<Category> XtreamClient::getSeriesCategories() {
-    return parseCategories(getJson({{"action", "get_series_categories"}}));
+    auto cats = parseCategories(getJson({{"action", "get_series_categories"}}));
+    if (cats.empty()) {
+        try {
+            auto panel = getPanelCategories();
+            cats = std::move(panel.series);
+        } catch (...) {}
+    }
+    return cats;
 }
 
 std::vector<Series> XtreamClient::getSeries(const std::string& categoryId) {

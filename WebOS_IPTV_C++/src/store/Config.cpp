@@ -30,8 +30,17 @@ Config Config::load() {
     c.username   = value_or<std::string>(j, "username",  "");
     c.password   = value_or<std::string>(j, "password",  "");
     c.frenchOnly = value_or<bool>(j, "frenchOnly", true);
+    c.selectedLanguages = stringArray(j, "selectedLanguages");
+    if (c.selectedLanguages.empty()) {
+        // Migration : compat avec ancien schema (frenchOnly seul).
+        c.selectedLanguages = c.frenchOnly ? std::vector<std::string>{"fr"}
+                                           : std::vector<std::string>{};
+    }
+    // Sync frenchOnly pour le code existant qui le consulte encore.
+    c.frenchOnly = (c.selectedLanguages.size() == 1 && c.selectedLanguages[0] == "fr");
     c.selectedMovieCategories  = stringArray(j, "selectedMovieCategories");
     c.selectedSeriesCategories = stringArray(j, "selectedSeriesCategories");
+    c.vostLanguages = stringArray(j, "vostLanguages");
     c.catalogSetupDone = value_or<bool>(j, "catalogSetupDone", false);
     return c;
 }
@@ -43,8 +52,10 @@ bool Config::save() const {
     j["username"]   = username;
     j["password"]   = password;
     j["frenchOnly"] = frenchOnly;
+    j["selectedLanguages"] = selectedLanguages;
     j["selectedMovieCategories"]  = selectedMovieCategories;
     j["selectedSeriesCategories"] = selectedSeriesCategories;
+    j["vostLanguages"] = vostLanguages;
     j["catalogSetupDone"] = catalogSetupDone;
     return writeJson(Paths::configFile(), j);
 }

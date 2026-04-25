@@ -32,6 +32,9 @@ public:
     // Reference-counted internally so nested acquires are safe.
     void acquireWakeLock(const std::string& reason);
     void releaseWakeLock();
+    // Re-émet un avBlock même si le refcount est déjà > 0. Nécessaire pour
+    // refresh périodique car l'avBlock TV a un TTL en pratique.
+    void pingWakeLock(const std::string& reason);
 
     void setRelaunchHandler(RelaunchHandler h) { on_relaunch_ = std::move(h); }
 

@@ -35,6 +35,10 @@ cmake --install "$BUILD_DIR"
 # We move the binary up so appinfo's "main" lookup works the standard way.
 mkdir -p "$PACKAGE_DIR"
 cp "$PROJECT_ROOT/appinfo.json" "$PACKAGE_DIR/"
+# NE PAS bundler run.sh : LD_LIBRARY_PATH=$APPDIR/lib casse NDL_DirectMediaLoad
+# (cf project_iptv_runsh_ndl_conflict.md). DivX MPEG-4 ASP retombe en panne mais
+# H264/HEVC NDL HW decode fonctionnent.
+# install -m 0755 "$PROJECT_ROOT/run.sh" "$PACKAGE_DIR/run.sh"
 cp "$PROJECT_ROOT/assets/icon.png" "$PACKAGE_DIR/" 2>/dev/null || true
 cp "$PROJECT_ROOT/assets/largeIcon.png" "$PACKAGE_DIR/" 2>/dev/null || true
 cp "$PROJECT_ROOT/assets/splash.png" "$PACKAGE_DIR/" 2>/dev/null || true

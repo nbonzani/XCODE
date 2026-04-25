@@ -32,9 +32,10 @@ pkg_check_modules(SQLITE REQUIRED sqlite3)
 pkg_check_modules(SDL2_TTF REQUIRED SDL2_ttf)
 pkg_check_modules(SDL2_IMAGE REQUIRED SDL2_image)
 
-add_executable(iptv-player
+set(IPTV_SOURCES
     src/main.cpp
     src/player/GstDecoder.cpp
+    src/player/SwDecoder.cpp
     src/player/Playlist.cpp
     src/xtream/XtreamClient.cpp
     src/xtream/CatalogSync.cpp
@@ -49,12 +50,67 @@ add_executable(iptv-player
     src/ui/TextRenderer.cpp
     src/ui/ImageLoader.cpp
     src/ui/FocusManager.cpp
+    src/ui/Draw.cpp
+    src/ui/Button.cpp
+    src/ui/Card.cpp
+    src/ui/Badge.cpp
+    src/ui/Spinner.cpp
+    src/ui/Overlay.cpp
+    src/ui/TabBar.cpp
+    src/ui/Toolbar.cpp
+    src/ui/Sidebar.cpp
+    src/ui/ContentCard.cpp
+    src/ui/VirtualKeyboard.cpp
     src/ui/PosterGrid.cpp
     src/ui/PlayerOSD.cpp
     src/ui/SettingsScreen.cpp
+    src/ui/CatalogFilterScreen.cpp
     src/ui/HomeScreen.cpp
     src/ui/SeriesDetailScreen.cpp
 )
+if(IPTV_TARGET_WEBOS)
+    list(APPEND IPTV_SOURCES
+        src/player/NdlDecoder.cpp
+        src/player/ndl_bridge.c
+    )
+else()
+    list(APPEND IPTV_SOURCES
+        src/player/NdlDecoder_stub.cpp
+    )
+endif()
+add_executable(iptv-player ${IPTV_SOURCES})
+
+# Second binaire (host only) : gallery des composants UI. Utile pour
+# itérer vite sur le look des Button/Card/Badge/Spinner sans rebrancher
+# tout l'app.
+if(NOT IPTV_TARGET_WEBOS)
+    add_executable(ui-demo
+        src/ui_demo.cpp
+        src/ui/TextRenderer.cpp
+        src/ui/Draw.cpp
+        src/ui/Button.cpp
+        src/ui/Card.cpp
+        src/ui/Badge.cpp
+        src/ui/Spinner.cpp
+        src/ui/Overlay.cpp
+        src/ui/TabBar.cpp
+        src/ui/Toolbar.cpp
+        src/ui/Sidebar.cpp
+        src/ui/ContentCard.cpp
+        src/ui/VirtualKeyboard.cpp
+    )
+    target_include_directories(ui-demo PRIVATE
+        ${SDL2_INCLUDE_DIRS} ${SDL2_TTF_INCLUDE_DIRS} ${SDL2_IMAGE_INCLUDE_DIRS}
+        src third_party
+    )
+    target_link_libraries(ui-demo PRIVATE
+        ${SDL2_LIBRARIES} ${SDL2_TTF_LIBRARIES} ${SDL2_IMAGE_LIBRARIES}
+    )
+    target_link_directories(ui-demo PRIVATE
+        ${SDL2_LIBRARY_DIRS} ${SDL2_TTF_LIBRARY_DIRS} ${SDL2_IMAGE_LIBRARY_DIRS}
+    )
+    target_compile_options(ui-demo PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()
 
 target_include_directories(iptv-player PRIVATE
     ${SDL2_INCLUDE_DIRS}
@@ -75,6 +131,7 @@ target_link_libraries(iptv-player PRIVATE
     ${CURL_LIBRARIES}
     ${SQLITE_LIBRARIES}
     Threads::Threads
+    ${CMAKE_DL_LIBS}
 )
 
 target_link_directories(iptv-player PRIVATE
@@ -99,7 +156,10 @@ target_compile_options(iptv-player PRIVATE
 if(IPTV_TARGET_WEBOS)
     target_compile_definitions(iptv-player PRIVATE IPTV_WEBOS=1)
     # libluna-service2 ships no .pc in the webosbrew sysroot — link manually.
-    target_link_libraries(iptv-player PRIVATE luna-service2 pbnjson_cpp pbnjson_c PmLogLib)
+    target_link_libraries(iptv-player PRIVATE luna-service2 pbnjson_cpp pbnjson_c PmLogLib NDL_directmedia)
+    # Export main-binary symbols so plugins dlopen'd at runtime can resolve
+    # the GLib-compat shims we provide for newer-GLib-only API on the older TV.
+    target_link_options(iptv-player PRIVATE "-Wl,--export-dynamic")
     # TV has SDL2 2.0.10 but we build against 2.30 — bundle our SDL .so in the IPK
     # and load them via rpath=$ORIGIN/lib so our binary ignores the TV copies.
     set_target_properties(iptv-player PROPERTIES

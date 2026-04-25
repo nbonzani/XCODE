@@ -1,7 +1,9 @@
 #include "player/GstDecoder.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <unistd.h>
 
 #include <SDL2/SDL_log.h>
 
@@ -17,40 +19,90 @@ GstDecoder::GstDecoder() {
         setenv("GST_PLUGIN_FEATURE_RANK", "lxvideodec:NONE,dvbin:NONE", 1);
         gst_init(nullptr, nullptr);
 
+        // Force-load our bundled libgstlibav.so explicitly. GST_PLUGIN_PATH
+        // appears to not override the system plugin with the same name, so
+        // decodebin gets the TV's stripped-down libav (no avdec_mpeg4).
+        if (const char* base = getenv("APPDIR")) {}  // unused, just silence
+        {
+            char selfdir[512] = {0};
+            ssize_t n = readlink("/proc/self/exe", selfdir, sizeof(selfdir)-1);
+            if (n > 0) {
+                selfdir[n] = 0;
+                if (char* slash = strrchr(selfdir, '/')) *slash = 0;
+                std::string path = std::string(selfdir) + "/lib/gstreamer-1.0/libgstlibav.so";
+                GError* err = nullptr;
+                GstPlugin* p = gst_plugin_load_file(path.c_str(), &err);
+                if (p) {
+                    SDL_Log("[gst] force-loaded bundled libav: %s", path.c_str());
+                    gst_object_unref(p);
+                } else {
+                    SDL_Log("[gst] FORCE LOAD FAILED: %s (err=%s)",
+                            path.c_str(), err ? err->message : "?");
+                    if (err) g_error_free(err);
+                }
+            }
+        }
+
         // Also downrank LG's hardware decoders in the live registry — the env var
         // is read at registry build time but some factories are registered after.
         GstRegistry* reg = gst_registry_get();
+        // Downrank HW decoders — they output to the HW overlay (invisible to
+        // our SDL appsink). Leave the HW sinks alone (lxvideosink/omx_lxvideosink)
+        // since downranking them broke playback paths that relied on caps
+        // negotiation through them even when not selected as final sink.
         for (const char* name : {"lxvideodec", "dvbin", "lxaudiodec", "lxvideodecmpeg4",
-                                  "lxvideodech264", "lxvideodech265"}) {
+                                  "lxvideodech264", "lxvideodech265",
+                                  "omx_lxvideodec"}) {
             if (GstElementFactory* f = gst_element_factory_find(name)) {
                 gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(f), GST_RANK_NONE);
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] downrank %s -> NONE", name);
+                SDL_Log("[gst] downrank %s -> NONE", name);
                 gst_object_unref(f);
             }
         }
         // Boost software decoder ranks so decodebin picks them.
-        for (const char* name : {"avdec_mpeg4", "avdec_h264", "avdec_h265", "avdec_mpeg2video"}) {
+        // Includes avdec_ac3: the TV's native ac3_audiodec seems to fail
+        // silently in caps negotiation on some AVI streams (pipeline stuck at
+        // READY). avdec_ac3 is the reliable fallback.
+        for (const char* name : {"avdec_mpeg4", "avdec_h264", "avdec_h265",
+                                  "avdec_mpeg2video", "avdec_ac3",
+                                  "avdec_msmpeg4", "avdec_msmpeg4v1",
+                                  "avdec_msmpeg4v2", "avdec_msmpeg4v3"}) {
             if (GstElementFactory* f = gst_element_factory_find(name)) {
                 gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(f),
                                              static_cast<guint>(GST_RANK_PRIMARY + 10));
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] boost %s rank", name);
+                SDL_Log("[gst] boost %s rank", name);
                 gst_object_unref(f);
             } else {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] %s not found on TV", name);
+                SDL_Log("[gst] %s not found on TV", name);
             }
         }
-        // Enumerate EVERY decoder the TV actually has so we know what else exists
-        // (useful to find lxvideodec sub-types like lxvp9, lxav1, etc.).
-        GList* list = gst_element_factory_list_get_elements(
-            GST_ELEMENT_FACTORY_TYPE_DECODER, GST_RANK_MARGINAL);
-        for (GList* l = list; l; l = l->next) {
-            auto* f = GST_ELEMENT_FACTORY(l->data);
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] decoder present: %s (rank=%u)",
+        // Enumerate decoders + video/audio sinks to know what HW elements exist.
+        for (auto type : {GST_ELEMENT_FACTORY_TYPE_DECODER,
+                          GST_ELEMENT_FACTORY_TYPE_SINK |
+                              GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO,
+                          GST_ELEMENT_FACTORY_TYPE_SINK |
+                              GST_ELEMENT_FACTORY_TYPE_MEDIA_AUDIO}) {
+            const char* label =
+                (type == GST_ELEMENT_FACTORY_TYPE_DECODER) ? "decoder" :
+                (type & GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO) ? "vsink" : "asink";
+            GList* list = gst_element_factory_list_get_elements(type, GST_RANK_MARGINAL);
+            for (GList* l = list; l; l = l->next) {
+                auto* f = GST_ELEMENT_FACTORY(l->data);
+                SDL_Log("[gst] %s: %s (rank=%u)", label,
                         GST_OBJECT_NAME(f),
                         gst_plugin_feature_get_rank(GST_PLUGIN_FEATURE(f)));
+            }
+            gst_plugin_feature_list_free(list);
         }
-        gst_plugin_feature_list_free(list);
-        (void)reg;
+        // List loaded plugins so we can confirm libav (gst-libav) is loaded.
+        GList* plugins = gst_registry_get_plugin_list(reg);
+        for (GList* l = plugins; l; l = l->next) {
+            auto* p = GST_PLUGIN(l->data);
+            SDL_Log("[gst] plugin: %s (file=%s)",
+                    gst_plugin_get_name(p),
+                    gst_plugin_get_filename(p) ? gst_plugin_get_filename(p) : "?");
+        }
+        gst_plugin_list_free(plugins);
         inited = true;
     }
 }
@@ -141,6 +193,16 @@ bool GstDecoder::open(const std::string& path) {
         // PulseAudio first; some TVs reject the clock so we force sync=FALSE
         // and provide-clock=FALSE to keep the pipeline progressing if pulse
         // is unhappy. Fall back to alsasink, then nothing (audio disabled).
+        // TEMP DEBUG (env IPTV_FAKESINK_AUDIO=1): swap pulsesink for fakesink
+        // to determine if the audio sink is what stalls READY->PAUSED on AC3.
+        const bool use_fakesink = std::getenv("IPTV_FAKESINK_AUDIO") != nullptr;
+        if (use_fakesink) {
+            audio_sink_ = gst_element_factory_make("fakesink", "asink");
+            if (audio_sink_) {
+                g_object_set(audio_sink_, "sync", FALSE, "async", FALSE, nullptr);
+                SDL_Log("[gst] audio sink: FAKESINK (debug)");
+            }
+        } else {
         audio_sink_ = gst_element_factory_make("pulsesink", "asink");
         if (audio_sink_) {
             // sync=TRUE keeps audio aligned with PTS; provide-clock=FALSE means
@@ -151,28 +213,50 @@ bool GstDecoder::open(const std::string& path) {
                          "provide-clock",  FALSE,
                          "async-handling", TRUE,
                          nullptr);
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio sink: pulsesink (sync=TRUE)");
+            SDL_Log("[gst] audio sink: pulsesink (sync=TRUE)");
         } else {
             audio_sink_ = gst_element_factory_make("alsasink", "asink");
             if (audio_sink_) {
                 g_object_set(audio_sink_, "sync", TRUE, "provide-clock", FALSE, nullptr);
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio sink: alsasink");
+                SDL_Log("[gst] audio sink: alsasink");
             } else {
                 audio_sink_ = gst_element_factory_make("autoaudiosink", "asink");
             }
         }
+        }  // end !use_fakesink else
         if (!audio_convert_ || !audio_resample_ || !audio_sink_) {
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] audio branch unavailable, video-only\n");
+            SDL_Log("[gst] audio branch unavailable, video-only\n");
             if (audio_convert_)  gst_object_unref(audio_convert_);
             if (audio_resample_) gst_object_unref(audio_resample_);
             if (audio_sink_)     gst_object_unref(audio_sink_);
             audio_convert_ = audio_resample_ = audio_sink_ = nullptr;
+        } else if (use_fakesink) {
+            // In debug fakesink mode, bypass the bin and connect the fakesink
+            // directly to playbin as audio-sink so no caps filter / convert
+            // interferes with caps negotiation upstream.
+            if (audio_convert_)  gst_object_unref(audio_convert_);
+            if (audio_resample_) gst_object_unref(audio_resample_);
+            audio_convert_ = audio_resample_ = nullptr;
+            g_object_set(pipeline_, "audio-sink", audio_sink_, nullptr);
+            flags |= PLAY_FLAG_AUDIO;
+            SDL_Log("[gst] audio-sink = bare fakesink (debug, no bin)");
         } else {
-            // sync property is already set above per backend; don't override.
+            // Force stereo downmix before the sink: some AC3 streams expose
+            // 5.1 caps et webOS pulsesink ne négocie pas 5.1 → stall
+            // READY→PAUSED silencieux. On limite à ≤2ch/rate raisonnable :
+            // trop strict (format fixé) fait staller preroll.
+            GstElement* caps_filter = gst_element_factory_make("capsfilter", "audio_caps");
+            GstCaps* caps = gst_caps_from_string(
+                "audio/x-raw,channels=(int)[1,2],rate=(int)[8000,48000]");
+            g_object_set(caps_filter, "caps", caps, nullptr);
+            gst_caps_unref(caps);
+
             audio_sink_bin_ = gst_bin_new("abin");
             gst_bin_add_many(GST_BIN(audio_sink_bin_),
-                             audio_convert_, audio_resample_, audio_sink_, nullptr);
-            gst_element_link_many(audio_convert_, audio_resample_, audio_sink_, nullptr);
+                             audio_convert_, audio_resample_, caps_filter,
+                             audio_sink_, nullptr);
+            gst_element_link_many(audio_convert_, audio_resample_, caps_filter,
+                                  audio_sink_, nullptr);
             GstPad* p = gst_element_get_static_pad(audio_convert_, "sink");
             gst_element_add_pad(audio_sink_bin_, gst_ghost_pad_new("sink", p));
             gst_object_unref(p);
@@ -181,6 +265,12 @@ bool GstDecoder::open(const std::string& path) {
         }
     }
     flags |= PLAY_FLAG_TEXT;  // let playbin overlay subtitles into the video stream
+    // DEBUG: env IPTV_NO_AUDIO=1 disables audio entirely. Used to isolate
+    // whether AC3 caps-negotiation is what stalls playsink at READY->PAUSED.
+    if (std::getenv("IPTV_NO_AUDIO")) {
+        flags &= ~PLAY_FLAG_AUDIO;
+        SDL_Log("[gst] IPTV_NO_AUDIO: disabling audio branch");
+    }
     g_object_set(pipeline_, "flags", flags, nullptr);
 
     std::string uri = toUri(path);
@@ -357,10 +447,11 @@ int GstDecoder::onNewSample(GstElement* sink, gpointer user) {
 
 int GstDecoder::onBusMessage(GstBus*, GstMessage* msg, gpointer user) {
     auto* self = static_cast<GstDecoder*>(user);
+    const gchar* src = GST_MESSAGE_SRC_NAME(msg) ? GST_MESSAGE_SRC_NAME(msg) : "?";
     switch (GST_MESSAGE_TYPE(msg)) {
         case GST_MESSAGE_EOS:
             self->eos_ = true;
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] EOS\n");
+            SDL_Log("[gst] EOS\n");
             break;
         case GST_MESSAGE_ERROR: {
             GError* err = nullptr;
@@ -368,21 +459,39 @@ int GstDecoder::onBusMessage(GstBus*, GstMessage* msg, gpointer user) {
             gst_message_parse_error(msg, &err, &dbg);
             self->last_error_ = err ? err->message : "unknown gst error";
             self->error_ = true;
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] ERROR: %s (%s)\n",
+            SDL_Log("[gst] ERROR from %s: %s (%s)\n", src,
                          err ? err->message : "?", dbg ? dbg : "");
             if (err) g_error_free(err);
             if (dbg) g_free(dbg);
             break;
         }
-        case GST_MESSAGE_STATE_CHANGED:
-            if (GST_MESSAGE_SRC(msg) == GST_OBJECT(self->pipeline_)) {
-                GstState oldS, newS;
-                gst_message_parse_state_changed(msg, &oldS, &newS, nullptr);
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[gst] state %s -> %s\n",
-                             gst_element_state_get_name(oldS),
-                             gst_element_state_get_name(newS));
-            }
+        case GST_MESSAGE_WARNING: {
+            GError* err = nullptr;
+            gchar* dbg = nullptr;
+            gst_message_parse_warning(msg, &err, &dbg);
+            SDL_Log("[gst] WARN from %s: %s (%s)\n", src,
+                    err ? err->message : "?", dbg ? dbg : "");
+            if (err) g_error_free(err);
+            if (dbg) g_free(dbg);
             break;
+        }
+        case GST_MESSAGE_STATE_CHANGED: {
+            GstState oldS, newS;
+            gst_message_parse_state_changed(msg, &oldS, &newS, nullptr);
+            // Log every element's state transition, not just the root pipeline,
+            // so we can see which one blocks on READY->PAUSED.
+            SDL_Log("[gst] %s state %s -> %s", src,
+                    gst_element_state_get_name(oldS),
+                    gst_element_state_get_name(newS));
+            break;
+        }
+        case GST_MESSAGE_STREAM_STATUS: {
+            GstStreamStatusType type;
+            GstElement* owner = nullptr;
+            gst_message_parse_stream_status(msg, &type, &owner);
+            SDL_Log("[gst] stream-status %d from %s", (int)type, src);
+            break;
+        }
         default:
             break;
     }

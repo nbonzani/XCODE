@@ -37,6 +37,16 @@ public:
     std::vector<Category> getLiveCategories();
     json                  getLiveStreamsRaw(const std::string& categoryId = {});
 
+    // Fallback via panel_api.php : certains serveurs Xtream renvoient [] sur
+    // action=get_vod_categories / get_series_categories alors que panel_api
+    // retourne bien les listes. On parse les 3 sous-arbres et on les expose.
+    struct PanelCategories {
+        std::vector<Category> movies;
+        std::vector<Category> series;
+        std::vector<Category> live;
+    };
+    PanelCategories getPanelCategories();
+
     // URL builders — match xtreamApi.js byte-for-byte for compatibility with cached IDs.
     std::string getStreamUrl(const std::string& streamId,
                              const std::string& containerExtension) const;
@@ -60,6 +70,12 @@ private:
     std::string apiUrl_;      // baseUrl_ + "/player_api.php"
     std::string username_;
     std::string password_;
+
+    // Cache mémoire du résultat panel_api (80-100 MB). Partagé entre
+    // getVodCategories/getSeriesCategories fallbacks pour éviter de
+    // télécharger deux fois la même payload.
+    bool panel_loaded_ = false;
+    PanelCategories panel_cache_;
 };
 
 }  // namespace iptv::xtream
