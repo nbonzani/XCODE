@@ -45,6 +45,11 @@ public:
     const std::string& lastError() const { return last_error_; }
     unsigned int videoSampleCount() const { return sample_count_; }
 
+    // Seek relatif ±sec via gst_element_seek_simple. Pour ←/→ player MPEG-4.
+    bool seekRelative(double delta_seconds);
+    double positionSeconds() const;
+    double durationSeconds() const;
+
 private:
     static GstFlowReturn onVideoSampleStatic(GstAppSink* sink, void* user);
     void onVideoSample(GstSample* sample);

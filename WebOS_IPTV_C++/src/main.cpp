@@ -1273,10 +1273,15 @@ private:
                 osd_->tick(SDL_GetTicks());
             }
             if (screen_ == Screen::Player && sw_ && osd_) {
-                // SwDecoder n'expose pas position/durée ; on laisse la
-                // timeline à 0. MAJ résolution dès que la première frame arrive,
-                // et on trigger le hide initial à ce moment-là (proxy de "la
-                // lecture a démarré").
+                double pos = sw_->positionSeconds();
+                double dur = sw_->durationSeconds();
+                if (seek_dialog_open_) {
+                    osd_->setProgress((double)seek_dialog_target_sec_,
+                                      seek_dialog_duration_sec_ > 0
+                                        ? seek_dialog_duration_sec_ : dur);
+                } else {
+                    osd_->setProgress(pos, dur);
+                }
                 int lw = 0, lh = 0;
                 {
                     std::lock_guard<std::mutex> g(latest_.m);
@@ -1574,8 +1579,7 @@ private:
             return;
         }
         if (decoder_) decoder_->seekRelative(seconds);
-        // sw_ : SwDecoder n'expose pas de seek (stream-based, libav
-        // direct). Pas de seek pour ce path pour l'instant.
+        if (sw_)      sw_->seekRelative(seconds);
     }
 
     // === Modale "Aller à" (seek via restart) ===================================

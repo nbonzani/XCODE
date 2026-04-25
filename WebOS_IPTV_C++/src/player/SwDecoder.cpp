@@ -269,4 +269,35 @@ void SwDecoder::onVideoSample(GstSample* sample) {
     gst_video_frame_unmap(&vframe);
 }
 
+double SwDecoder::positionSeconds() const {
+    if (!pipeline_) return 0.0;
+    gint64 pos = 0;
+    if (!gst_element_query_position(pipeline_, GST_FORMAT_TIME, &pos)) return 0.0;
+    return (double)pos / GST_SECOND;
+}
+
+double SwDecoder::durationSeconds() const {
+    if (!pipeline_) return 0.0;
+    gint64 dur = 0;
+    if (!gst_element_query_duration(pipeline_, GST_FORMAT_TIME, &dur)) return 0.0;
+    return (double)dur / GST_SECOND;
+}
+
+bool SwDecoder::seekRelative(double delta_seconds) {
+    if (!pipeline_) return false;
+    gint64 pos = 0;
+    if (!gst_element_query_position(pipeline_, GST_FORMAT_TIME, &pos)) {
+        SDL_Log("[sw] seek: query_position failed");
+        return false;
+    }
+    gint64 target = pos + (gint64)(delta_seconds * GST_SECOND);
+    if (target < 0) target = 0;
+    SDL_Log("[sw] seek %+ds: %lld -> %lld ns",
+            (int)delta_seconds, (long long)pos, (long long)target);
+    return gst_element_seek_simple(
+        pipeline_, GST_FORMAT_TIME,
+        (GstSeekFlags)(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
+        target);
+}
+
 }  // namespace iptv
