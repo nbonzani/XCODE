@@ -157,13 +157,14 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
         // passe par uridecodebin qui configure souphttpsrc via ses propriétés
         // par défaut. Pour les specs Xtream on patchera le user-agent via
         // source-setup plus tard si besoin.
-        // Buffer HTTP 16 MB sans use-buffering pour démarrer rapidement.
-        // use-buffering=true fait attendre 99% du buffer AVANT de passer en
-        // PLAYING → ajoute 10 s de pré-roll sur 1080p/4K ce qui est pire
-        // que quelques saccades.
+        // Buffer HTTP 32 MB / 20 s — augmenté pour absorber le jitter HTTP
+        // Xtream/CDN qui livre en bursts irréguliers et causait des micro-
+        // stalls visibles à l'écran. use-buffering=true éviterait toute
+        // saccade mais ajoute 10 s de pré-roll, donc on reste sur buffer
+        // implicite + queue2 dimensionné large.
         src = "souphttpsrc location=" + uri + " automatic-redirect=true ! "
-              "queue2 max-size-buffers=0 max-size-bytes=16777216 "
-              "max-size-time=5000000000";
+              "queue2 max-size-buffers=0 max-size-bytes=33554432 "
+              "max-size-time=20000000000";
     } else {
         // filesrc wants a path, not a URI — strip the "file://" scheme prefix.
         std::string path = uri;
@@ -222,17 +223,20 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
         // le webOS pulsesink se retrouvait avec des buffers de taille
         // différente de ce qu'il avait négocié → "sink received buffer of
         // wrong size" en boucle (souvent silence + craquements).
-        // sync=false : sync A/V côté vidéo. async-handling=true : évite
-        // que set_state(PLAYING) bloque sur la pré-roll pulsesink.
+        // Build D : appsink "asink" → ndl_bridge_play_audio_pcm. NDL gère
+        // audio + vidéo sur la MÊME horloge HW = sync A/V parfaite (pas de
+        // dérive entre pulsesink CPU clock et NDL HW clock). Format imposé :
+        // S16LE interleaved stéréo 48 kHz (audio.pcm dans Load).
         audio_branch = std::string(" demux. ! queue ! ") + aparse + " ! " + adec +
                        " ! audioconvert ! audioresample ! "
                        "audio/x-raw,format=S16LE,channels=2,rate=48000 ! "
-                       "pulsesink sync=false provide-clock=false async-handling=true";
+                       "appsink name=asink emit-signals=true sync=true max-buffers=0 drop=false";
     } else {
+        // Fallback decodebin → asink NDL (même chemin que ci-dessus).
         audio_branch =
             " demux. ! queue ! decodebin ! audioconvert ! audioresample ! "
             "audio/x-raw,format=S16LE,channels=2,rate=48000 ! "
-            "pulsesink sync=true provide-clock=false async-handling=true";
+            "appsink name=asink emit-signals=true sync=true max-buffers=0 drop=false";
     }
 
     // Hybrid pipeline : NDL for hardware video decode + pulsesink for audio.
@@ -242,11 +246,12 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
         "demux. ! queue max-size-buffers=0 max-size-bytes=33554432 max-size-time=10000000000 ! " +
         vparse + " config-interval=-1 ! " +
         vcaps + " ! "
-        // sync=true (ROLLBACK) : NDL sur notre build webOS 6.5.3 n'a pas
-        // NDL_DirectVideoSetFrameDropThreshold exporté (rc=-1), donc pas de
-        // drop interne si on le noie. Sans appsink pacing, écran noir.
-        // Le recommandation SS4S (sync=false) suppose des builds avec
-        // l'API drop-threshold active — pas le cas ici.
+        // sync=true : GStreamer pace les buffers selon PTS+clock, on les
+        // pousse dans NDL au rythme correct. Avec audio HW NDL aussi paçé
+        // par sync=true sur asink, la sync A/V est portée par l'horloge
+        // GStreamer commune (pas de dérive entre branches audio/video).
+        // max-buffers=0 drop=false : pas de drop, on laisse l'appsink
+        // accumuler si NDL est temporairement lent.
         "appsink name=vsink emit-signals=true sync=true max-buffers=0 drop=false" +
         audio_branch;
 
@@ -445,7 +450,11 @@ bool NdlDecoder::seekRelative(int delta_seconds) {
     gst_element_set_state(pipeline_, GST_STATE_NULL);
     ndl_bridge_unload();
     media_loaded_ = false;
-    int rc = ndl_bridge_load(is_h265_ ? 1 : 0, video_width_, video_height_, 0, 0);
+    // audio HW dans NDL : sample_rate=48000 channels=2 si on attend bien
+    // de l'audio ; sinon 0,0 (pas de session audio NDL).
+    const int ndl_sr = skip_audio_ ? 0 : 48000;
+    const int ndl_ch = skip_audio_ ? 0 : 2;
+    int rc = ndl_bridge_load(is_h265_ ? 1 : 0, video_width_, video_height_, ndl_sr, ndl_ch);
     if (rc != 0) {
         SDL_Log("[ndl] seek: reload failed rc=%d", rc);
         return false;
@@ -531,7 +540,10 @@ void NdlDecoder::onVideoSample(GstSample* sample) {
         SDL_Log("[ndl] Load (lazy) %s %dx%d (hint %dx%d)",
                 is_h265_ ? "H265" : "H264", lw, lh,
                 video_width_, video_height_);
-        int rc = ndl_bridge_load(is_h265_ ? 1 : 0, lw, lh, 0, 0);
+        // audio HW dans NDL si on n'a pas skip_audio (TrueHD, AVI...)
+        const int ndl_sr = skip_audio_ ? 0 : 48000;
+        const int ndl_ch = skip_audio_ ? 0 : 2;
+        int rc = ndl_bridge_load(is_h265_ ? 1 : 0, lw, lh, ndl_sr, ndl_ch);
         if (rc != 0) {
             // Retry une fois pour HEVC en ajustant la hauteur à un multiple
             // de 16 (certains drivers LG refusent 1080 non-aligné ; Load
@@ -539,7 +551,7 @@ void NdlDecoder::onVideoSample(GstSample* sample) {
             if (is_h265_ && (lh % 16) != 0) {
                 int lh16 = ((lh + 15) / 16) * 16;
                 SDL_Log("[ndl] retry Load H265 %dx%d (aligned 16)", lw, lh16);
-                rc = ndl_bridge_load(1, lw, lh16, 0, 0);
+                rc = ndl_bridge_load(1, lw, lh16, ndl_sr, ndl_ch);
             }
             if (rc != 0) {
                 last_error_ = ndl_bridge_last_error();
