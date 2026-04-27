@@ -60,6 +60,11 @@ public:
 
     bool hasError() const { return error_.load(); }
     bool eos() const { return eos_.load(); }
+    // Indique qu'une 404 a été détectée par souphttpsrc (CDN refuse la
+    // requête, typiquement 2e film lancé trop vite après le 1er → la
+    // session CDN serveur n'a pas eu le temps de libérer). Le watchdog
+    // app peut s'en servir pour retry après 2s avec les mêmes params.
+    bool isCdnNotFound() const { return cdn_not_found_.load(); }
     const std::string& lastError() const { return last_error_; }
     // Nombre de samples vidéo déjà poussés à NDL. Un watchdog côté app
     // peut surveiller ça pour déclencher un fallback (ex : matroskademux
@@ -97,6 +102,7 @@ private:
     GstElement* pipeline_ = nullptr;
     std::atomic<bool> error_{false};
     std::atomic<bool> eos_{false};
+    std::atomic<bool> cdn_not_found_{false};
     std::string last_error_;
 
     // Diag stutter : timings inter-arrivée + durée submit NDL.
@@ -109,6 +115,7 @@ private:
     uint32_t a_dt_over80_ = 0;
     uint32_t a_submit_max_ = 0; uint64_t a_submit_sum_ = 0; uint32_t a_submit_count_ = 0;
     long long first_pts_ns_ = -1;
+    uint32_t  wallclock_start_ms_ = 0;  // throttle manuel : SDL_GetTicks() au 1er sample
     std::atomic<long long> last_pts_ns_{-1};  // dernier PTS vidéo vu
     unsigned int sample_count_ = 0;
     unsigned int audio_sample_count_ = 0;

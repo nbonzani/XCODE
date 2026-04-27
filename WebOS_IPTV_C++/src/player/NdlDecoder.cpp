@@ -41,29 +41,11 @@ bool NdlDecoder::init(const std::string& appId) {
     static bool libav_loaded = false;
     if (!libav_loaded) {
         libav_loaded = true;
-        // Évincer libav TV (qui rejette DivX) avant de charger libaviptv
-        GstRegistry* reg0 = gst_registry_get();
-        if (GstPlugin* old = gst_registry_find_plugin(reg0, "libav")) {
-            gst_registry_remove_plugin(reg0, old);
-            gst_object_unref(old);
-            SDL_Log("[ndl] evicted TV libav plugin");
-        }
-        char selfdir[512] = {0};
-        ssize_t n = readlink("/proc/self/exe", selfdir, sizeof(selfdir) - 1);
-        if (n > 0) {
-            selfdir[n] = 0;
-            if (char* slash = strrchr(selfdir, '/')) *slash = 0;
-            std::string path = std::string(selfdir) + "/lib/gstreamer-1.0/libgstlibaviptv.so";
-            GError* err = nullptr;
-            GstPlugin* p = gst_plugin_load_file(path.c_str(), &err);
-            if (p) {
-                SDL_Log("[ndl] force-loaded gst-libav-iptv: %s", path.c_str());
-                gst_object_unref(p);
-            } else {
-                SDL_Log("[ndl] gst-libav-iptv load failed: %s", err ? err->message : "?");
-                if (err) g_error_free(err);
-            }
-        }
+        // NE PAS évincer le plugin libav natif TV ici : il fournit avdec_aac,
+        // avdec_ac3, avdec_eac3 nécessaires à la branche audio decodebin.
+        // gst-libav-iptv (pour DivX/MPEG-4 ASP) est chargé par SwDecoder
+        // uniquement quand on en a besoin — son éviction de libav natif y
+        // est cantonnée. NdlDecoder reste compatible avec libav natif.
         // Pre-load le plugin lxaudiodec pour que ses factories soient
         // disponibles avant le downrank (sinon gst_element_factory_find
         // retourne NULL et le downrank ne prend pas effet).
@@ -76,6 +58,13 @@ bool NdlDecoder::init(const std::string& appId) {
         // pulsesink n'arrive pas à downmixer → "wrong size" en boucle ou
         // son absent. avdec_* de libav sort des caps standards downmixable.
         // Downrank ciblé (noms connus) :
+        // Approche radicale : on REMOVE les factories audio HW LG du registry
+        // (au lieu d'un simple downrank). decodebin3 webOS 6.5 sélectionne
+        // ac3_audiodec/aac_audiodec malgré rank=NONE (test t19 confirme rank=0
+        // mais decodebin3 picke quand même → caps-specificity prime sur rank).
+        // remove_feature les sort entièrement du candidat-set, garantissant
+        // que decodebin3 tombe sur avdec_*.
+        GstRegistry* reg_audio = gst_registry_get();
         for (const char* name : {"ac3_audiodec", "eac3_audiodec",
                                   "aac_audiodec", "mp3_audiodec",
                                   "ac4_audiodec", "flac_audiodec",
@@ -83,10 +72,10 @@ bool NdlDecoder::init(const std::string& appId) {
                                   "alac_audiodec", "amr_audiodec",
                                   "adpcm_audiodec", "wma_audiodec",
                                   "pcm_audiodec", "mpegh_audiodec"}) {
-            if (GstElementFactory* f = gst_element_factory_find(name)) {
-                gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(f), GST_RANK_NONE);
+            if (GstPluginFeature* f = gst_registry_lookup_feature(reg_audio, name)) {
+                gst_registry_remove_feature(reg_audio, f);
                 gst_object_unref(f);
-                SDL_Log("[ndl] downranked %s", name);
+                SDL_Log("[ndl] removed %s from registry", name);
             }
         }
         // Downrank générique : tout factory dont le nom commence par
@@ -116,6 +105,20 @@ bool NdlDecoder::init(const std::string& appId) {
                                              GST_RANK_PRIMARY + 10);
                 gst_object_unref(f);
                 SDL_Log("[ndl] upranked %s", name);
+            } else {
+                SDL_Log("[ndl] %s NOT in registry", name);
+            }
+        }
+        // Diag : log ranks effectifs des décodeurs audio principaux pour
+        // diagnostiquer pourquoi decodebin webOS 6.5 préfère parfois
+        // aac_audiodec malgré le downrank.
+        for (const char* name : {"avdec_aac", "aac_audiodec",
+                                  "avdec_ac3", "ac3_audiodec",
+                                  "avdec_eac3", "eac3_audiodec"}) {
+            if (GstElementFactory* f = gst_element_factory_find(name)) {
+                guint r = gst_plugin_feature_get_rank(GST_PLUGIN_FEATURE(f));
+                SDL_Log("[ndl] rank %s = %u", name, r);
+                gst_object_unref(f);
             }
         }
     }
@@ -162,7 +165,13 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
         // stalls visibles à l'écran. use-buffering=true éviterait toute
         // saccade mais ajoute 10 s de pré-roll, donc on reste sur buffer
         // implicite + queue2 dimensionné large.
-        src = "souphttpsrc location=" + uri + " automatic-redirect=true ! "
+        // keep-alive=false : force Connection: close à chaque requête HTTP.
+        // Sur compte Xtream max_connections=1, le serveur tient la session
+        // ouverte jusqu'au timeout TCP keepalive (15-30s+). Avec
+        // Connection: close, le serveur libère immédiatement à la fin du
+        // stream → attente entre 2 plays réduite.
+        src = "souphttpsrc location=" + uri + " automatic-redirect=true "
+              "keep-alive=false ! "
               "queue2 max-size-buffers=0 max-size-bytes=33554432 "
               "max-size-time=20000000000";
     } else {
@@ -213,6 +222,11 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
         aparse = "mpegaudioparse";
         adec   = "avdec_mp3";
     }
+    // Audio : on garde `demux.` (pad audio non nommé) — l'audio pad name varie
+    // selon les versions du muxer source (audio_0, audio_104, etc.) alors que
+    // video_0 est stable. Côté audio, n'importe quel pad-added du demux qui
+    // matche les caps attendues fera l'affaire ; l'autre branche video_0
+    // verrouille déjà le pad vidéo.
     std::string audio_branch;
     if (drain_audio) {
         audio_branch =
@@ -236,9 +250,15 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
                        "audio/x-raw,format=S16LE,channels=2,rate=48000 ! "
                        "appsink name=asink emit-signals=true sync=true max-buffers=0 drop=false";
     } else {
-        // Fallback decodebin → asink NDL (même chemin que ci-dessus).
+        // Fallback : decodebin avec les *_audiodec HW LG REMOVED du registry +
+        // signal autoplug-select pour bloquer les lxaudiodec* survivants.
+        // Décision (test t22) : sans audio_codec hint explicite, decodebin
+        // webOS 6.5 plante en "missing plug-in" sur AAC, mais EAC3 passe via
+        // avdec_eac3. On laisse decodebin essayer ; si AAC, l'audio sera muet.
+        // Une bascule vers une chaîne aacparse+avdec_aac dynamique selon les
+        // caps demux serait propre mais demande un refactor pad-added complet.
         audio_branch =
-            " demux. ! queue ! decodebin ! audioconvert ! audioresample ! "
+            " demux. ! queue ! decodebin name=adecbin ! audioconvert ! audioresample ! "
             "audio/x-raw,format=S16LE,channels=2,rate=48000 ! "
             "appsink name=asink emit-signals=true sync=true max-buffers=0 drop=false";
     }
@@ -255,10 +275,15 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
     // h26?parse externe en aval, NDL avale les samples sans les décoder
     // → écran noir silencieux. Un capsfilter statique seul ne suffit pas
     // (link rc=-4 NOFORMAT, refuse la renégo). Il faut un parser actif.
+    // Pad nommé `demux.video_0` au lieu de `demux.` : sans le numéro, parse_launch
+    // link le PREMIER pad-added du demux à la suite, qui peut être audio sur MP4
+    // (qtdemux émet parfois audio_0 avant video_0). On force le binding au pad
+    // vidéo via le naming convention partagé qtdemux/matroskademux/avidemux
+    // (tous nomment leurs pads video_0, audio_0, ...).
     std::string desc =
         src + " ! " +
         demux + " name=demux "
-        "demux. ! queue max-size-buffers=0 max-size-bytes=33554432 max-size-time=10000000000 ! "
+        "demux.video_0 ! queue max-size-buffers=0 max-size-bytes=33554432 max-size-time=10000000000 ! "
         "parsebin name=vparse "
         // sync=true : GStreamer pace les buffers selon PTS+clock, on les
         // pousse dans NDL au rythme correct. Avec audio HW NDL aussi paçé
@@ -278,6 +303,10 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
         if (err) g_error_free(err);
         return false;
     }
+
+    // (Note 2026-04-27 : tentative d'un gst_pipeline_use_clock(system_clock)
+    // pour fixer le fast-forward du 2e play a aggravé le problème — le 1er
+    // play était cassé aussi. Laisse GStreamer choisir son clock par défaut.)
 
     // Attach a bus watcher so we see state transitions, warnings, errors.
     // Certains flux audio (AVI + AC3 multichannel, échantillonnage atypique)
@@ -301,6 +330,9 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
                 const char* msgStr = e ? e->message : "";
                 bool isWrongSize = msgStr &&
                     (strstr(msgStr, "wrong size") || strstr(msgStr, "different type"));
+                bool isCdn404 = msgStr && src &&
+                    strstr(src, "souphttpsrc") &&
+                    (strstr(msgStr, "Not Found") || strstr(msgStr, "404"));
                 if (isWrongSize) {
                     int n = ++g_pulse_err_count;
                     uint32_t now = SDL_GetTicks();
@@ -310,6 +342,10 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
                     if (n == 1 || n % 100 == 0) {
                         SDL_Log("[ndl-bus] pulsesink wrong-size ×%d (src=%s)", n, src);
                     }
+                } else if (isCdn404) {
+                    SDL_Log("[ndl-bus] CDN 404 from %s : %s (session pas encore lib\xC3\xA9r\xC3\xA9e c\xC3\xB4t\xC3\xA9 serveur)",
+                            src, e ? e->message : "?");
+                    if (self) self->cdn_not_found_.store(true);
                 } else {
                     SDL_Log("[ndl-bus] ERROR from %s: %s (%s)", src,
                             e ? e->message : "?", dbg ? dbg : "");
@@ -372,6 +408,34 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
         g_signal_connect(asink, "new-sample",
                          G_CALLBACK(&NdlDecoder::onAudioSampleStatic), this);
         gst_object_unref(asink);
+    }
+    // autoplug-select + autoplug-factories sur decodebin audio : on retire
+    // les décodeurs HW LG (`*_audiodec`, élément nommé lxaudiodec*) du
+    // candidat-set car ils stallent en PAUSED au 2e play (le 1er play ne
+    // libère pas leur contexte HW). avdec_* côté gst-libav fonctionne à
+    // chaque play sans état pollué. autoplug-factories filtre AVANT que
+    // decodebin demande autoplug-select, ce qui garantit qu'il considère
+    // bien les fallbacks (sinon decodebin abandonne avec "missing plug-in"
+    // si on lui SKIP le seul candidat).
+    GstElement* adecbin = gst_bin_get_by_name(GST_BIN(pipeline_), "adecbin");
+    if (adecbin) {
+        // autoplug-select : le plus simple — laisser decodebin construire son
+        // candidat-set par défaut, on filtre case-par-case via SKIP. Si on lui
+        // donne TROP de candidats via autoplug-factories (ex. inplacedecryptor
+        // sans intent), il loop sur l'auto-plug de ces éléments parasites.
+        g_signal_connect(adecbin, "autoplug-select",
+            G_CALLBACK(+[](GstElement*, GstPad*, GstCaps*,
+                           GstElementFactory* factory, gpointer) -> gint {
+                const gchar* fname = factory ? gst_plugin_feature_get_name(
+                    GST_PLUGIN_FEATURE(factory)) : nullptr;
+                if (fname && (g_str_has_suffix(fname, "_audiodec") ||
+                              g_str_has_prefix(fname, "lxaudiodec"))) {
+                    SDL_Log("[ndl] autoplug-select SKIP %s (HW LG)", fname);
+                    return 2;  // GST_AUTOPLUG_SELECT_SKIP
+                }
+                return 0;  // GST_AUTOPLUG_SELECT_TRY
+            }), nullptr);
+        gst_object_unref(adecbin);
     }
 
     // DirectMediaLoad est déplacé vers play() : on a besoin des vraies caps
@@ -500,7 +564,15 @@ bool NdlDecoder::seekRelative(int delta_seconds) {
 
 void NdlDecoder::stop() {
     if (pipeline_) {
+        // set_state(NULL) est ASYNCHRONE : il enclenche la transition mais
+        // ne bloque pas. Si on unref avant la fin, des callbacks (onVideoSample
+        // dans threads streaming) peuvent encore tourner sur le `this` détruit.
+        // Pire : le NDL driver côté HW reçoit potentiellement des set_state
+        // futurs sur un pipeline en cours de teardown → état zombie qui fait
+        // que le 2e film ne reçoit jamais de samples (samples=0 au watchdog).
+        // get_state avec timeout attend la fin de la transition → cleanup propre.
         gst_element_set_state(pipeline_, GST_STATE_NULL);
+        gst_element_get_state(pipeline_, nullptr, nullptr, 5 * GST_SECOND);
         gst_object_unref(pipeline_);
         pipeline_ = nullptr;
     }
@@ -513,9 +585,14 @@ void NdlDecoder::stop() {
         ndl_bridge_flush();
         ndl_bridge_set_area(-2, -2, 1, 1);
         ndl_bridge_unload();
+        // Pas de blocking sleep ici : le settle inter-films CDN (2s) est géré
+        // côté main.cpp dans playUrl en différé (consommé pendant la navigation
+        // utilisateur). Le HW NDL lui-même a juste besoin de quelques ms pour
+        // libérer ses buffers, négligeable.
         media_loaded_ = false;
     }
     first_pts_ns_ = -1;
+    wallclock_start_ms_ = 0;
     sample_count_ = 0;
     audio_sample_count_ = 0;
 }
@@ -542,19 +619,39 @@ void NdlDecoder::onVparsePadAddedStatic(GstElement* /*el*/, GstPad* pad,
     if (caps_str) g_free(caps_str);
 
     bool is_h265 = false;
+    bool is_video = false;
     if (caps && gst_caps_get_size(caps) > 0) {
         GstStructure* s = gst_caps_get_structure(caps, 0);
         const char* media = gst_structure_get_name(s);
-        is_h265 = media && std::strcmp(media, "video/x-h265") == 0;
+        if (media) {
+            is_video = std::strncmp(media, "video/", 6) == 0;
+            is_h265  = std::strcmp(media, "video/x-h265") == 0;
+        }
     }
     if (caps) gst_caps_unref(caps);
+    // Garde-fou : si parsebin émet un pad audio (peut arriver si on lui
+    // pousse un container avec audio interne, p.ex. mp4 dont la branche
+    // demux a "fui" un buffer audio dans queue→parsebin avant le pad
+    // vidéo nommé). On ignore — l'audio est traité par sa propre chaîne
+    // demux.audio_0 → aparse/adec → asink.
+    if (!is_video) {
+        SDL_Log("[ndl] vparse pad-added non-video, skip");
+        return;
+    }
 
     GstElement* vsink = gst_bin_get_by_name(GST_BIN(self->pipeline_), "vsink");
-    if (!vsink) return;
+    if (!vsink) {
+        SDL_Log("[ndl] pad-added: vsink NOT FOUND in bin!");
+        return;
+    }
     GstPad* vsink_pad = gst_element_get_static_pad(vsink, "sink");
-    if (!vsink_pad) { gst_object_unref(vsink); return; }
+    if (!vsink_pad) {
+        SDL_Log("[ndl] pad-added: vsink_pad NULL!");
+        gst_object_unref(vsink);
+        return;
+    }
     if (gst_pad_is_linked(vsink_pad)) {
-        SDL_Log("[ndl] vparse pad-added: vsink already linked, skip");
+        SDL_Log("[ndl] pad-added: vsink ALREADY LINKED (caps maybe re-emitted), skip");
         gst_object_unref(vsink_pad);
         gst_object_unref(vsink);
         return;
@@ -583,15 +680,28 @@ void NdlDecoder::onVparsePadAddedStatic(GstElement* /*el*/, GstPad* pad,
     gst_caps_unref(fc);
 
     gst_bin_add_many(GST_BIN(self->pipeline_), parser, filter, nullptr);
-    gst_element_sync_state_with_parent(parser);
-    gst_element_sync_state_with_parent(filter);
 
+    // Linker AVANT sync_state pour que les éléments ne ratent pas de buffers,
+    // PUIS forcer set_state(PLAYING) explicitement. sync_state_with_parent()
+    // peut renvoyer ASYNC ou FAILURE silencieusement → on force et on log.
     GstPad* parser_sink = gst_element_get_static_pad(parser, "sink");
     GstPadLinkReturn r1 = gst_pad_link(pad, parser_sink);
     gst_object_unref(parser_sink);
     bool ok2 = gst_element_link_many(parser, filter, vsink, nullptr);
-    SDL_Log("[ndl] dynamic chain %s+filter+vsink: link1=%d link2=%d",
-            parser_name, (int)r1, (int)ok2);
+
+    // Sync state des éléments dynamiques avec leur parent (pipeline est en
+    // PLAYING). C'est la pratique recommandée par GStreamer pour le
+    // dynamic linking dans pad-added handlers. NE PAS ajouter de
+    // g_object_set sync ni de set_state(pipeline, PLAYING) explicite —
+    // ces hacks ont causé des régressions (boucle de relances, fast forward
+    // au 1er play). Le sync=true du pipeline string + sync_state_with_parent
+    // suffisent.
+    gboolean sr1 = gst_element_sync_state_with_parent(parser);
+    gboolean sr2 = gst_element_sync_state_with_parent(filter);
+    gboolean sr3 = gst_element_sync_state_with_parent(vsink);
+
+    SDL_Log("[ndl] dynamic chain %s+filter+vsink: link1=%d link2=%d sync[parser=%d filter=%d vsink=%d]",
+            parser_name, (int)r1, (int)ok2, (int)sr1, (int)sr2, (int)sr3);
 
     gst_object_unref(vsink_pad);
     gst_object_unref(vsink);
@@ -701,9 +811,24 @@ void NdlDecoder::onVideoSample(GstSample* sample) {
     long long pts_us = (pts_ns != (long long)GST_CLOCK_TIME_NONE) ? (pts_ns / 1000) : 0;
     if (first_pts_ns_ < 0 && pts_ns != (long long)GST_CLOCK_TIME_NONE) {
         first_pts_ns_ = pts_ns;
+        wallclock_start_ms_ = SDL_GetTicks();
         bool is_keyframe = !GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_DELTA_UNIT);
         SDL_Log("[ndl] first video sample size=%u pts_ns=%lld pts_us=%lld IDR=%d",
                 (unsigned)map.size, pts_ns, pts_us, (int)is_keyframe);
+    }
+    // Throttle manuel : sync=true GStreamer ne pace pas correctement les
+    // buffers sur webOS 6.5.3 / GStreamer 1.16 (observation : dt avg=3-7ms
+    // au lieu de 41ms à 24fps → fast forward x6+). On compense en bloquant
+    // le streaming thread jusqu'à ce que SDL_GetTicks() rattrape le PTS.
+    if (first_pts_ns_ >= 0 && pts_ns != (long long)GST_CLOCK_TIME_NONE) {
+        long long stream_elapsed_ms = (pts_ns - first_pts_ns_) / 1000000;
+        uint32_t expected_ms = wallclock_start_ms_ + (uint32_t)stream_elapsed_ms;
+        uint32_t now_ms = SDL_GetTicks();
+        if (expected_ms > now_ms) {
+            uint32_t wait = expected_ms - now_ms;
+            if (wait > 200) wait = 200;  // cap sécu pour ne pas freeze trop
+            SDL_Delay(wait);
+        }
     }
     if (pts_ns != (long long)GST_CLOCK_TIME_NONE) last_pts_ns_.store(pts_ns);
     sample_count_++;

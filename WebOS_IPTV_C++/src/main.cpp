@@ -355,6 +355,15 @@ public:
         });
         settings_->setOnCancel([this]{ if (!config_.serverUrl.empty()) gotoHome(); });
         settings_->setOnOpenCatalogFilter([this]{ gotoCatalogFilter(); });
+        // Quand le test conn réussit sur des champs modifiés (= nouveau
+        // serveur) : recharge config, recrée XtreamClient + lance une sync
+        // complète pour repeupler les listes de catégories disponibles
+        // dans la fenêtre filtre catalogue.
+        settings_->setOnServerChangedAfterTest([this]{
+            config_ = iptv::store::Config::load();
+            recreateXtreamClient();
+            kickoffSync();
+        });
         // Test connexion : instancie un XtreamClient temporaire avec les
         // champs courants et appelle authenticate() dans un thread détaché.
         settings_->setOnTestConnection(
@@ -570,6 +579,10 @@ private:
             return;
         }
         if (!client_) { SDL_Log("onOpenMovie: no client"); return; }
+        // Reset retry count : le user a explicitement choisi un nouveau film
+        // via l'UI, on repart à 0 retries (les retries précédents étaient
+        // pour un film différent).
+        cdn_retry_count_ = 0;
         // Call get_vod_info first: React does this and the CDN seems to gate
         // the /movie/ download on it (session registration / cookie).
         // On extrait aussi le codec audio pour forcer la chaîne statique
@@ -679,6 +692,30 @@ private:
                     container.c_str(), (int)skip_audio, seek_sec);
             testbench_mode_ = true;
             exitPlayer();
+            // Xtream CDN gate : si l'URL ressemble à /movie/<user>/<pass>/<id>.<ext>,
+            // on appelle getVodInfo(id) pour réveiller la session côté CDN. Sans ça,
+            // les /movie/ subséquents reviennent en 401 Unauthorized (1er play OK
+            // car la session UI précédente a déjà tokenisé). Cf memory
+            // project_iptv_xtream_vodinfo_gate.md.
+            if (client_ && url.find("/movie/") != std::string::npos) {
+                auto last_slash = url.find_last_of('/');
+                auto last_dot   = url.find_last_of('.');
+                if (last_slash != std::string::npos &&
+                    last_dot   != std::string::npos &&
+                    last_dot > last_slash) {
+                    std::string sid = url.substr(last_slash + 1, last_dot - last_slash - 1);
+                    if (!sid.empty()) {
+                        try {
+                            auto info = client_->getVodInfo(sid);
+                            SDL_Log("testbench getVodInfo(%s) -> ok=%d",
+                                    sid.c_str(), (int)info.is_object());
+                        } catch (const std::exception& e) {
+                            SDL_Log("testbench getVodInfo(%s) failed: %s",
+                                    sid.c_str(), e.what());
+                        }
+                    }
+                }
+            }
             initial_stream_url_ = url;
             initial_stream_title_ = title;
             initial_stream_codec_ = codec;
@@ -826,6 +863,15 @@ private:
         SDL_Log("playUrl: resolving redirect for %s", orig_url.c_str());
         std::string url = resolveRedirect(orig_url);
         SDL_Log("playUrl: effective url=%s", url.c_str());
+        // Annule toute retry CDN 404 en attente : si un retry était armé pour
+        // un film X et l'utilisateur (ou testbench) lance Y, le timer firait
+        // après le settle et écraserait Y avec le retry de X. Observation
+        // 2026-04-27 : p1 fail → retry armé +15s ; user push p2 → settle 15s ;
+        // p2 démarre, puis le retry fire et bascule sur l'URL de p1.
+        if (cdn_retry_at_ms_ != 0 && cdn_retry_url_ != orig_url) {
+            SDL_Log("[retry] cancel pending CDN 404 retry (new play)");
+            cdn_retry_at_ms_ = 0;
+        }
         screen_ = Screen::Player;
         player_paused_ = false;
         player_muted_  = false;
@@ -842,6 +888,20 @@ private:
         playerUrl_   = url;
         playerItemId_ = itemId;
         playerSeriesId_ = seriesId;
+        // Reset playlist si on lance un film (pas une série) — sinon les
+        // boutons Prev/Next dans l'OSD restent activés avec l'ancienne
+        // playlist d'épisodes série, et le prompt "épisode suivant"
+        // pourrait s'afficher à tort.
+        if (seriesId.empty()) {
+            player_playlist_.clear();
+            player_playlist_idx_ = -1;
+        }
+        // Garde-fou EOS : on enregistre l'instant de démarrage et on remet
+        // le flag eos_handled_ à zéro. Le check EOS dans la boucle ignore
+        // toute remontée EOS dans les 5 premières secondes (latence
+        // pipeline/buffering) et n'agit qu'une fois par session.
+        player_play_start_ms_ = SDL_GetTicks();
+        eos_handled_ = false;
 
         // Router : si initial_stream_codec_ dit explicitement "h264" ou
         // "hevc" → NDL HW decode. Sinon fallback GstDecoder (SW pour mpeg4,
@@ -863,7 +923,78 @@ private:
             // deux films de codecs différents laisse le bridge NDL dans un état
             // pollué (media_loaded_ pas remis à zéro côté driver) → samples=0
             // après switch h264→hevc. On repart toujours d'une instance neuve.
-            if (ndl_) { stopNdlRefresh(); ndl_->stop(); ndl_.reset(); }
+            if (ndl_) {
+                stopNdlRefresh(); ndl_->stop(); ndl_.reset();
+                last_ndl_stop_ms_ = SDL_GetTicks();
+            }
+            // CDN settle : ce compte Xtream a max_connections=1. Quand on quitte
+            // un stream, la connexion TCP côté serveur n'est pas immédiatement
+            // libérée (Confirmé par test CLI : 2 GET parallèles sur /movie/ →
+            // le 2e en 404). active_cons=0 dans get_user_info NE REFLÈTE PAS
+            // l'état réel du CDN backend. Solution : délai brut depuis le
+            // dernier exitPlayer/stop, qui couvre le timeout TCP serveur.
+            // 8s : observation empirique. Si l'utilisateur a navigué assez
+            // longtemps dans le menu, l'attente est nulle (diff déjà passée).
+            if (last_ndl_stop_ms_ != 0) {
+                uint32_t elapsed = SDL_GetTicks() - last_ndl_stop_ms_;
+                SDL_Log("[cdn-settle] check: last_stop=%ums ago, settle=%ums",
+                        elapsed, kCdnSettleMs);
+                if (elapsed < kCdnSettleMs) {
+                    uint32_t wait_until = SDL_GetTicks() + (kCdnSettleMs - elapsed);
+                    SDL_Log("[cdn-settle] settle %ums avec pump GLib + render overlay",
+                            kCdnSettleMs - elapsed);
+                    while (SDL_GetTicks() < wait_until) {
+                        // Pump GLib : draine les events bus pending de l'ancien
+                        // pipeline pour que le main context reste sain. Sans ça,
+                        // le 2e gst_bus_add_watch n'arrive pas à dispatcher
+                        // ses events (observation : pas de state events après
+                        // création du 2e pipeline).
+                        while (g_main_context_iteration(NULL, FALSE)) {}
+
+                        // Affichage overlay countdown
+                        int remaining_s = (int)((wait_until - SDL_GetTicks() + 999) / 1000);
+                        if (remaining_s < 1) remaining_s = 1;
+                        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+                        SDL_RenderClear(renderer_);
+                        const int panelW = 720, panelH = 240;
+                        SDL_Rect panel{(kWidth - panelW) / 2, (kHeight - panelH) / 2,
+                                       panelW, panelH};
+                        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+                        iptv::ui::draw::fillRoundedRect(renderer_, panel, 16,
+                                                        SDL_Color{8, 12, 24, 240});
+                        iptv::ui::draw::strokeRoundedRect(renderer_, panel, 16, 3,
+                                                          iptv::ui::theme::Accent);
+                        const char* title = "Pr\xC3\xA9paration du serveur";
+                        int tw = 0, th = 0;
+                        text_.measure(iptv::ui::theme::FontStyle::Xl2Bold, title, tw, th);
+                        text_.draw(iptv::ui::theme::FontStyle::Xl2Bold, title,
+                                   panel.x + (panel.w - tw) / 2, panel.y + 36,
+                                   iptv::ui::theme::TextPrimary);
+                        char counter[16];
+                        std::snprintf(counter, sizeof(counter), "%d s", remaining_s);
+                        int cw = 0, ch = 0;
+                        text_.measure(iptv::ui::theme::FontStyle::Xl3Bold, counter, cw, ch);
+                        text_.draw(iptv::ui::theme::FontStyle::Xl3Bold, counter,
+                                   panel.x + (panel.w - cw) / 2,
+                                   panel.y + panel.h - ch - 36,
+                                   iptv::ui::theme::Accent);
+                        SDL_RenderPresent(renderer_);
+                        SDL_Delay(100);  // 10 fps + pump GLib réguliers
+                    }
+                    // Final clear avec alpha=0 → SDL window transparent →
+                    // le HW overlay NDL sera visible quand les samples flow.
+                    // Pattern strict : BlendMode NONE puis alpha=0 (cf
+                    // render() ligne 2096-2099). Sans BlendMode NONE, alpha=0
+                    // peut être ignoré ou mal blendé → SDL reste opaque
+                    // → cache l'overlay HW.
+                    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
+                    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
+                    SDL_RenderClear(renderer_);
+                    SDL_RenderPresent(renderer_);
+                }
+            } else {
+                SDL_Log("[cdn-settle] skip (1ere lecture, last_ndl_stop_ms_=0)");
+            }
             ndl_ = std::make_unique<iptv::NdlDecoder>();
             ndl_->setSkipAudio(initial_stream_skip_audio_);
             ndl_->setAudioCodec(initial_stream_audio_codec_);
@@ -1061,6 +1192,12 @@ private:
             stopNdlRefresh();
             ndl_->stop();
             ndl_.reset();
+            // Marquer le moment de sortie NDL : le prochain playUrl
+            // attendra kCdnSettleMs (2s) depuis ce point pour laisser le
+            // serveur Xtream libérer la session précédente. L'attente
+            // est consommée en background pendant que l'utilisateur navigue
+            // dans le menu, donc le plus souvent imperceptible.
+            last_ndl_stop_ms_ = SDL_GetTicks();
         }
         if (sw_) {
             sw_->stop();
@@ -1075,10 +1212,12 @@ private:
         }
         if (testbench_mode_) {
             screen_ = Screen::Player;
+        } else if (!playerSeriesId_.empty() && seriesScreen_) {
+            // BACK depuis lecteur d'épisode → fenêtre série (l'utilisateur
+            // a déjà navigué jusqu'à cette série, on n'écrase pas son chemin).
+            screen_ = Screen::Series;
         } else {
-            // BACK depuis le lecteur → écran principal (Home) quoi qu'il
-            // arrive. L'utilisateur peut re-rentrer dans une série par
-            // la vignette Home.
+            // BACK depuis lecteur de film → écran principal (Home).
             screen_ = Screen::Home;
         }
     }
@@ -1129,6 +1268,17 @@ private:
                                                       : initial_stream_title_);
             }
 
+            // Retry CDN 404 : déclencher le re-play après les 2s d'attente.
+            if (cdn_retry_at_ms_ != 0 && SDL_GetTicks() >= cdn_retry_at_ms_) {
+                SDL_Log("[retry] CDN 404 retry → playUrl(%s)", cdn_retry_url_.c_str());
+                cdn_retry_at_ms_ = 0;
+                initial_stream_audio_codec_ = cdn_retry_audio_;
+                initial_stream_skip_audio_  = cdn_retry_skip_;
+                initial_stream_codec_       = "auto";
+                initial_stream_seek_sec_    = 0;
+                playUrl(cdn_retry_url_, cdn_retry_id_, cdn_retry_series_, cdn_retry_title_);
+            }
+
             // Testbench command file polling : tous les 500 ms, on lit
             // /tmp/testbench_cmd.json, on le supprime, et on relance avec
             // le streamUrl qu'il contient. Permet au banc de test (sur le
@@ -1148,6 +1298,17 @@ private:
 
             SDL_Event ev;
             int polled = 0;
+            // Throttle KEYDOWN adaptatif : la télécommande webOS envoie ~200ms
+            // par event en maintien. Quand la main loop stall (NDL push, GLib
+            // pump), des KEYDOWN s'accumulent et sont consommés en burst →
+            // saute 3-5 cases. On filtre :
+            //   - Mode normal : 120ms min entre KEYDOWN (anti-burst)
+            //   - Mode "maintien" (même touche, 3 presses consécutives dans
+            //     300ms) : 50ms min → scroll plus rapide pour parcourir un
+            //     long carrousel sans ralentir l'expérience répétition naturelle.
+            const uint32_t kKeyRepeatMinMs = 120;
+            const uint32_t kKeyRepeatFastMs = 50;
+            const uint32_t kHoldDetectMs = 300;
             while (SDL_PollEvent(&ev)) {
                 ++polled;
                 if (ev.type == SDL_KEYDOWN) {
@@ -1156,7 +1317,27 @@ private:
                 }
                 if (ev.type == SDL_QUIT) running = false;
                 if (ev.type == SDL_KEYDOWN) {
-                    last_input_ticks_ = SDL_GetTicks();
+                    uint32_t now_ms = SDL_GetTicks();
+                    int sym = ev.key.keysym.sym;
+                    // Détection maintien : même touche dans 300ms = compte ;
+                    // sinon on reset.
+                    if (sym == last_keydown_sym_ &&
+                        now_ms - last_keydown_ms_ < kHoldDetectMs) {
+                        same_key_count_++;
+                    } else {
+                        same_key_count_ = 1;
+                    }
+                    last_keydown_sym_ = sym;
+                    uint32_t throttle = (same_key_count_ >= 3)
+                                            ? kKeyRepeatFastMs
+                                            : kKeyRepeatMinMs;
+                    if (now_ms - last_keydown_ms_ < throttle) {
+                        // Drop ce KEYDOWN : trop proche du précédent
+                        // (burst de la queue après stall main loop).
+                        continue;
+                    }
+                    last_keydown_ms_ = now_ms;
+                    last_input_ticks_ = now_ms;
                     // Si screensaver OLED actif, la première touche le ferme
                     // sans la transmettre à l'UI (sinon on déclencherait une
                     // action involontaire).
@@ -1169,10 +1350,16 @@ private:
                     // Télécommande LG webOS : certaines touches arrivent
                     // avec sym=0 (keycode non résolu par SDL) + scancode
                     // vendor-specific. On mappe les scancodes observés vers
-                    // nos constantes KEY::*. Observé 2026-04-24 : BACK = 482.
+                    // nos constantes KEY::*. Observé sur OLED C1 webOS 6.5.3 :
+                    //   482  → BACK
+                    //   486-489 → RED/GREEN/YELLOW/BLUE
                     if (k == 0 && sc != 0) {
                         switch (sc) {
-                            case 482: k = iptv::app::KEY::BACK; break;
+                            case 482: k = iptv::app::KEY::BACK;   break;
+                            case 486: k = iptv::app::KEY::RED;    break;
+                            case 487: k = iptv::app::KEY::GREEN;  break;
+                            case 488: k = iptv::app::KEY::YELLOW; break;
+                            case 489: k = iptv::app::KEY::BLUE;   break;
                             default: break;
                         }
                     }
@@ -1188,10 +1375,20 @@ private:
 
             images_.pump();
             // Re-read cache when the background sync flips the dirty flag.
-            if (catalog_dirty_.exchange(false) && screen_ == Screen::Home) {
-                SDL_Log("catalog dirty -> reloading HomeScreen");
-                home_->load();
+            if (catalog_dirty_.load()) {
+                if (screen_ == Screen::Home) {
+                    SDL_Log("catalog dirty -> reloading HomeScreen");
+                    home_->load();
+                    catalog_dirty_ = false;
+                } else if (screen_ == Screen::Filter && catalogFilter_) {
+                    SDL_Log("catalog dirty -> reloading CatalogFilter");
+                    catalogFilter_->load();
+                    catalog_dirty_ = false;
+                }
+                // Sur d'autres écrans, on garde le flag pour reload au retour.
             }
+            // Informe le CatalogFilter de l'état de sync (overlay "Chargement…").
+            if (catalogFilter_) catalogFilter_->setSyncing(sync_active_.load());
             // Informe la HomeScreen de l'état de sync pour animer le spinner
             // dans la Toolbar (bouton "Sync…").
             home_->setSyncing(sync_active_);
@@ -1225,17 +1422,67 @@ private:
             }
 
             // Watchdog NDL : si aucun sample vidéo poussé après 4 s, ou si
-            // Load a déjà raté (hasError=true), on bascule immédiatement vers
-            // GstDecoder. Causes typiques : matroskademux refuse de link sur
-            // un codec mal annoncé, ou NDL Load rc=-1 (HEVC profil non
-            // supporté par cette build).
+            // Load a déjà raté (hasError=true), on AVORTE la lecture pour les
+            // codecs HW-only (h264/hevc) — le fallback SW est inutilisable
+            // sur la TV en 4K (CPU mips trop faible, lecture saccadée à 1-3
+            // fps). Pour mpeg4 et autres codecs SW-viable, on garde le
+            // fallback Gst. Causes typiques de la non-décodage HW :
+            // matroskademux refuse de link sur un codec mal annoncé, NDL
+            // Load rc=-1 (HEVC profil non supporté), ou CDN renvoie 404
+            // (session Xtream expirée → souphttpsrc Not Found).
             bool ndl_failed_fast = ndl_ && ndl_->hasError();
+            bool ndl_cdn_404 = ndl_ && ndl_->isCdnNotFound();
+            // Retry CDN 404 simple : 1 seule retry après kCdnSettleMs si le
+            // settle initial n'a pas suffi. Filet de sécurité, pas une stratégie
+            // (la 1ère lecture devrait déjà attendre kCdnSettleMs depuis le
+            // dernier stop NDL). Plus de retries n'aide pas (testé : pattern
+            // erratique du serveur, plus de retry = autant de 404).
+            if (ndl_cdn_404 && cdn_retry_count_ < 1 && screen_ == Screen::Player) {
+                SDL_Log("[watchdog] CDN 404 → retry 1/1 dans %ums",
+                        kCdn404RetryMs);
+                cdn_retry_url_     = playerUrl_;
+                cdn_retry_id_      = playerItemId_;
+                cdn_retry_series_  = playerSeriesId_;
+                cdn_retry_title_   = playerTitle_;
+                cdn_retry_audio_   = initial_stream_audio_codec_;
+                cdn_retry_skip_    = initial_stream_skip_audio_;
+                cdn_retry_at_ms_   = SDL_GetTicks() + kCdn404RetryMs;
+                cdn_retry_count_++;
+                stopNdlRefresh();
+                ndl_->stop(); ndl_.reset();
+                last_ndl_stop_ms_ = SDL_GetTicks();
+                ndl_watchdog_at_ms_ = 0;
+                continue;
+            }
             if (screen_ == Screen::Player && ndl_ && ndl_watchdog_at_ms_ != 0 &&
                 (ndl_failed_fast ||
                  SDL_GetTicks() >= ndl_watchdog_at_ms_)) {
                 if (ndl_failed_fast || ndl_->videoSampleCount() == 0) {
-                    SDL_Log("[watchdog] NDL KO (error=%d samples=%u) → fallback GstDecoder",
-                            (int)ndl_failed_fast, ndl_->videoSampleCount());
+                    const std::string& c = initial_stream_codec_;
+                    bool isHwOnly = (c == "h264" || c == "hevc" || c == "h265" ||
+                                     c == "auto" || c.empty());
+                    if (isHwOnly) {
+                        // Pas de fallback SW pour H264/HEVC : la TV ne suit
+                        // pas en 4K. Affiche message d'erreur et exit player.
+                        SDL_Log("[watchdog] NDL KO (error=%d samples=%u) codec=%s "
+                                "→ abort (pas de fallback SW pour H264/HEVC)",
+                                (int)ndl_failed_fast, ndl_->videoSampleCount(),
+                                c.c_str());
+                        stopNdlRefresh();
+                        ndl_->stop(); ndl_.reset();
+                        // Important : marquer le moment de teardown ici pour
+                        // que le prochain playUrl applique le settle CDN 12s.
+                        // Sans ça l'utilisateur enchaîne sur un 404.
+                        last_ndl_stop_ms_ = SDL_GetTicks();
+                        ndl_watchdog_at_ms_ = 0;
+                        player_error_msg_ = "Lecture HW \xC3\xA9chou\xC3\xA9e. "
+                                            "Sessions Xtream simultan\xC3\xA9es ou flux indisponible.";
+                        player_error_until_ = SDL_GetTicks() + 5000;
+                        exitPlayer();
+                        continue;
+                    }
+                    SDL_Log("[watchdog] NDL KO (error=%d samples=%u) codec=%s → fallback GstDecoder",
+                            (int)ndl_failed_fast, ndl_->videoSampleCount(), c.c_str());
                     std::string saveUrl    = playerUrl_;
                     std::string saveId     = playerItemId_;
                     std::string saveSeries = playerSeriesId_;
@@ -1245,7 +1492,7 @@ private:
                     ndl_->stop(); ndl_.reset();
                     ndl_watchdog_at_ms_ = 0;
                     // "gst" ne match ni use_ndl ni use_sw → force GstDecoder
-                    // (playbin auto-plug, gère HEVC/VP9/etc).
+                    // (playbin auto-plug, gère mpeg4, vc1, vp8/9 SW).
                     initial_stream_codec_       = "gst";
                     initial_stream_audio_codec_ = saveAudio;
                     initial_stream_seek_sec_    = 0;
@@ -1273,6 +1520,39 @@ private:
                     osd_->hideIn(2000);
                 }
                 osd_->tick(SDL_GetTicks());
+                // Prompt "Episode suivant" (1 min avant fin) si série avec
+                // épisode suivant dispo.
+                {
+                    double dur = ndl_->durationSeconds();
+                    bool prev_prompt = next_ep_prompt_visible_;
+                    // Spec : prompt visible la dernière minute avant la fin.
+                    // Fallback test : si dur inconnu (NDL ne sait pas) on
+                    // s'appuie sur "after 60% du temps écoulé" comme proxy
+                    // — utile pour les fichiers MP4 où durée non probée.
+                    bool nearEndByDur = dur > 60 && pos > dur - 60.0 && pos < dur - 1.0;
+                    bool unknownDurFallback = dur < 1 && pos > 60.0;
+                    next_ep_prompt_visible_ =
+                        !player_playlist_.empty() &&
+                        player_playlist_idx_ + 1 < (int)player_playlist_.size() &&
+                        (nearEndByDur || unknownDurFallback);
+                    if (next_ep_prompt_visible_ && !prev_prompt) {
+                        SDL_Log("[next-ep-prompt] visible (pos=%.1f dur=%.1f idx=%d/%d)",
+                                pos, dur, player_playlist_idx_,
+                                (int)player_playlist_.size());
+                    }
+                }
+                // Auto-next sur EOS NDL : avec garde anti-rebond et cooldown
+                // 5s pour ignorer les faux EOS d'init pipeline.
+                if (ndl_->eos() && !eos_handled_ &&
+                    SDL_GetTicks() > player_play_start_ms_ + 5000) {
+                    eos_handled_ = true;
+                    if (!player_playlist_.empty() &&
+                        player_playlist_idx_ + 1 < (int)player_playlist_.size()) {
+                        playerGoNext();
+                    } else {
+                        exitPlayer();
+                    }
+                }
             }
             if (screen_ == Screen::Player && sw_ && osd_) {
                 double pos = sw_->positionSeconds();
@@ -1297,6 +1577,20 @@ private:
                     }
                 }
                 osd_->tick(SDL_GetTicks());
+                next_ep_prompt_visible_ =
+                    !player_playlist_.empty() &&
+                    player_playlist_idx_ + 1 < (int)player_playlist_.size() &&
+                    dur > 60 && pos > dur - 60.0 && pos < dur - 1.0;
+                if (sw_->eos() && !eos_handled_ &&
+                    SDL_GetTicks() > player_play_start_ms_ + 5000) {
+                    eos_handled_ = true;
+                    if (!player_playlist_.empty() &&
+                        player_playlist_idx_ + 1 < (int)player_playlist_.size()) {
+                        playerGoNext();
+                    } else {
+                        exitPlayer();
+                    }
+                }
             }
             if (screen_ == Screen::Player && decoder_) {
                 if (savedPosition_ > 5 && decoder_->durationSeconds() > savedPosition_ + 5) {
@@ -1323,12 +1617,42 @@ private:
                     osd_->hideIn(2000);
                 }
                 osd_->tick(SDL_GetTicks());
+                {
+                    double dur = decoder_->durationSeconds();
+                    bool prev_prompt = next_ep_prompt_visible_;
+                    // Spec : prompt visible la dernière minute avant la fin.
+                    // Fallback test : si dur inconnu (NDL ne sait pas) on
+                    // s'appuie sur "after 60% du temps écoulé" comme proxy
+                    // — utile pour les fichiers MP4 où durée non probée.
+                    bool nearEndByDur = dur > 60 && pos > dur - 60.0 && pos < dur - 1.0;
+                    bool unknownDurFallback = dur < 1 && pos > 60.0;
+                    next_ep_prompt_visible_ =
+                        !player_playlist_.empty() &&
+                        player_playlist_idx_ + 1 < (int)player_playlist_.size() &&
+                        (nearEndByDur || unknownDurFallback);
+                    if (next_ep_prompt_visible_ && !prev_prompt) {
+                        SDL_Log("[next-ep-prompt] visible (pos=%.1f dur=%.1f idx=%d/%d)",
+                                pos, dur, player_playlist_idx_,
+                                (int)player_playlist_.size());
+                    }
+                }
                 if (decoder_->hasError()) {
                     player_error_msg_ = decoder_->lastError().substr(0, 100);
                     player_error_until_ = SDL_GetTicks() + 4000;
                     exitPlayer();
-                } else if (decoder_->eos()) {
-                    exitPlayer();
+                } else if (decoder_->eos() && !eos_handled_ &&
+                           SDL_GetTicks() > player_play_start_ms_ + 5000) {
+                    eos_handled_ = true;
+                    // Auto-next sur fin d'épisode : si playlist série avec
+                    // épisode suivant, enchaîne ; sinon exit. Le flag
+                    // eos_handled_ empêche les rebonds (EOS qui fire encore
+                    // pendant le teardown du pipeline en cours).
+                    if (!player_playlist_.empty() &&
+                        player_playlist_idx_ + 1 < (int)player_playlist_.size()) {
+                        playerGoNext();
+                    } else {
+                        exitPlayer();
+                    }
                 }
             }
 
@@ -1414,6 +1738,15 @@ private:
 
         if (!decoder_ && !ndl_ && !sw_) return;
         handled = true;
+
+        // Prompt "Episode suivant" actif : OK saute immédiatement à
+        // l'épisode suivant. Test AVANT le seek/pause-toggle pour que la
+        // touche OK ne déclenche pas pause.
+        if (next_ep_prompt_visible_ && iptv::app::isOkKey(k)) {
+            next_ep_prompt_visible_ = false;
+            playerGoNext();
+            return;
+        }
 
         // Seek LEFT/RIGHT : sur NDL → ouvre la modale "Aller à" (NDL pas de
         // seek inplace). Sur GstDecoder → ±30 s silencieux (seek_simple OK).
@@ -1777,6 +2110,10 @@ private:
         const auto& ep = player_playlist_[newIdx];
         player_playlist_idx_ = newIdx;
         initial_stream_audio_codec_ = ep.audioCodec;
+        // Reset seek : on commence l'épisode suivant à 0, pas au seek
+        // mémorisé de l'épisode précédent (sinon ep2 démarre à la position
+        // où on avait avancé sur ep1).
+        initial_stream_seek_sec_ = 0;
         playUrl(ep.url, ep.id, playerSeriesId_, ep.title);
     }
 
@@ -1889,6 +2226,60 @@ private:
 
     // Modale "Aller à" — sélection de timer pour relance. Voile + panneau
     // central avec temps courant / durée + hints keymap.
+    // Affiche un overlay "Préparation serveur..." pendant le settle CDN
+    // entre 2 lectures. Bloque la main loop pendant max 12s, mais render
+    // un compte à rebours pour que l'utilisateur sache que ça avance.
+    // Pas de gestion d'events SDL pendant ce temps : limitation acceptable.
+    void renderCdnSettleOverlay(uint32_t wait_ms) {
+        const uint32_t start_ms = SDL_GetTicks();
+        const uint32_t end_ms   = start_ms + wait_ms;
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+
+        while (SDL_GetTicks() < end_ms) {
+            uint32_t now = SDL_GetTicks();
+            int remaining_s = (int)((end_ms - now + 999) / 1000);
+            if (remaining_s < 1) remaining_s = 1;
+
+            // Background opaque
+            SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+            SDL_RenderClear(renderer_);
+
+            // Panel central
+            const int panelW = 720, panelH = 240;
+            SDL_Rect panel{(kWidth - panelW) / 2, (kHeight - panelH) / 2,
+                           panelW, panelH};
+            iptv::ui::draw::fillRoundedRect(renderer_, panel, 16,
+                                            SDL_Color{8, 12, 24, 240});
+            iptv::ui::draw::strokeRoundedRect(renderer_, panel, 16, 3,
+                                              iptv::ui::theme::Accent);
+
+            // Titre
+            const char* title = "Pr\xC3\xA9paration du serveur";
+            int tw = 0, th = 0;
+            text_.measure(iptv::ui::theme::FontStyle::Xl2Bold, title, tw, th);
+            text_.draw(iptv::ui::theme::FontStyle::Xl2Bold, title,
+                       panel.x + (panel.w - tw) / 2, panel.y + 36,
+                       iptv::ui::theme::TextPrimary);
+
+            // Compteur — gros chiffre
+            char counter[16];
+            std::snprintf(counter, sizeof(counter), "%d s", remaining_s);
+            int cw = 0, ch = 0;
+            text_.measure(iptv::ui::theme::FontStyle::Xl3Bold, counter, cw, ch);
+            text_.draw(iptv::ui::theme::FontStyle::Xl3Bold, counter,
+                       panel.x + (panel.w - cw) / 2,
+                       panel.y + panel.h - ch - 36,
+                       iptv::ui::theme::Accent);
+
+            SDL_RenderPresent(renderer_);
+            SDL_Delay(250);  // 4 fps suffit pour un compteur en s
+        }
+        // Clear avant de rendre le contrôle au flux normal
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+        SDL_RenderClear(renderer_);
+        SDL_RenderPresent(renderer_);
+    }
+
     void renderSeekDialog() {
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
         // Voile : ne recouvre PAS la zone OSD bas d'écran (260 px) pour que
@@ -2093,6 +2484,30 @@ private:
             osd_->setPlaying(!player_paused_);
             osd_->render(renderer_, kWidth, kHeight);
         }
+        // Prompt "épisode suivant" : visible 1 min avant la fin d'un épisode
+        // de série quand un épisode suivant existe. La touche OK l'active.
+        // Position : au-dessus de la zone OSD bottom (260 px) pour ne pas
+        // être masqué par la barre quand celle-ci est visible.
+        if (next_ep_prompt_visible_) {
+            const char* msg = "OK \xC2\xBB Episode suivant";  // OK » ép. suivant
+            int lw = 0, lh = 0;
+            text_.measure(iptv::ui::theme::FontStyle::LgBold, msg, lw, lh);
+            const int padX = 28, padY = 18;
+            const int margin = 32;
+            const int osdZoneTop = kHeight - 260;  // OSD occupe les 260 px bas
+            SDL_Rect bg{kWidth - lw - padX * 2 - margin,
+                        osdZoneTop - lh - padY * 2 - margin,
+                        lw + padX * 2,
+                        lh + padY * 2};
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            iptv::ui::draw::fillRoundedRect(renderer_, bg, 14,
+                                            SDL_Color{8, 12, 24, 240});
+            iptv::ui::draw::strokeRoundedRect(renderer_, bg, 14, 3,
+                                              iptv::ui::theme::Accent);
+            text_.draw(iptv::ui::theme::FontStyle::LgBold, msg,
+                       bg.x + padX, bg.y + padY,
+                       SDL_Color{255, 255, 255, 255});
+        }
         (void)has_new;
     }
 
@@ -2127,11 +2542,44 @@ private:
     bool initial_stream_skip_audio_ = false;
     int initial_stream_seek_sec_ = 0;
     uint32_t pending_initial_play_ms_ = 0;  // 0 = no pending auto-play
+    // Garde EOS auto-next : eos_handled_ empêche les rebonds (EOS qui fire
+    // plusieurs fois pendant le tear-down du pipeline). player_play_start_ms_
+    // sert de cooldown : on ignore les EOS dans les 5 premières secondes
+    // d'une nouvelle lecture (faux EOS pendant init pipeline).
+    uint32_t player_play_start_ms_ = 0;
+    bool eos_handled_ = false;
+    // Prompt "épisode suivant" affiché en bas à droite quand on est dans la
+    // dernière minute d'un épisode de série avec un épisode suivant dispo.
+    // OK active immédiatement le saut, sinon EOS auto-next prend le relais.
+    bool next_ep_prompt_visible_ = false;
 
     // Screensaver OLED anti-burn-in : après N secondes d'inactivité, on
     // remplace le rendu UI par un fond noir + un carré bleu qui se déplace.
     // Toute touche réveille (+ est consommée).
     uint32_t last_input_ticks_ = 0;
+    uint32_t last_keydown_ms_ = 0;  // throttle KEYDOWN (anti-burst stall)
+    int      last_keydown_sym_ = 0;
+    int      same_key_count_ = 0;   // détection maintien pour scroll rapide
+    // CDN settle : timestamp du dernier stop NDL. On attend kCdnSettleMs
+    // avant de démarrer un nouveau playUrl pour laisser le serveur Xtream
+    // libérer la session précédente (sinon 404 sur le 2e film).
+    // 8s : observation empirique — 5s ne suffit pas pour spectnfc.com avec
+    // max_connections=1. Le timeout TCP serveur est plus long.
+    // Dans 90% des cas, l'utilisateur navigue dans le menu pendant cette
+    // durée, donc l'attente effective est nulle.
+    uint32_t last_ndl_stop_ms_ = 0;
+    // 15s : settle systématique entre 2 plays NDL pour spectnfc qui a un
+    // cooldown CDN strict (test CLI : 5-30s erratique). 0s testé mais
+    // boucle infinie observée sur for-smart (peut-être lié au token CDN
+    // qui régénère trop vite). 15s = compromis stable.
+    static constexpr uint32_t kCdnSettleMs = 15000;
+    static constexpr uint32_t kCdn404RetryMs = 15000;
+    // Retry CDN 404 (filet de sécurité) si l'utilisateur enchaîne très vite.
+    uint32_t cdn_retry_at_ms_ = 0;
+    int      cdn_retry_count_ = 0;
+    std::string cdn_retry_url_, cdn_retry_id_, cdn_retry_series_, cdn_retry_title_;
+    std::string cdn_retry_audio_;
+    bool     cdn_retry_skip_ = false;
     bool screensaver_active_ = false;
     static constexpr uint32_t kScreensaverIdleMs = 30000;
     // Modal "Quitter l'application ?" : BACK sur Home l'ouvre, les autres
