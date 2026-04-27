@@ -185,10 +185,14 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
         demux = "matroskademux";
     }
 
-    const char* vparse = is_h265 ? "h265parse" : "h264parse";
-    const char* vcaps  = is_h265
-        ? "video/x-h265,stream-format=byte-stream,alignment=au"
-        : "video/x-h264,stream-format=byte-stream,alignment=au";
+    // (parsebin remplace h264parse/h265parse hardcodé : auto-détecte le
+    // codec réel depuis le bitstream. Sans ça, un mismatch hint (ex:
+    // Xtream renvoie codec_name vide → fallback heuristique .mkv ⇒ h264 →
+    // not-negotiated sur HEVC) provoque écran noir + watchdog SW. Le hint
+    // is_h265 reçu en paramètre n'est plus utilisé pour la pipeline ;
+    // is_h265_ est mis à jour dynamiquement dans onVideoSample depuis les
+    // caps réelles du 1er sample, AVANT ndl_bridge_load.)
+    (void)is_h265;
 
     // Pour les .avi et les containers avec codec audio problématique (DTS),
     // on branche fakesink direct sur le pad audio — pas de décodage, juste
@@ -240,12 +244,22 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
     }
 
     // Hybrid pipeline : NDL for hardware video decode + pulsesink for audio.
+    // parsebin auto-détecte le codec et émet pad-added avec les caps réelles
+    // (video/x-h264 ou video/x-h265). Le pad-added handler
+    // (onVparsePadAddedStatic) crée dynamiquement la chaîne :
+    //   parsebin → h264parse|h265parse(config-interval=-1) → capsfilter(byte-stream,au) → vsink
+    //
+    // Pourquoi ce détour : parsebin sort le format natif du container
+    // (mkv → hvc1 NAL length-prefixed). NDL_DirectVideoPlay attend
+    // byte-stream Annex-B (NAL séparés par start codes 0x00000001). Sans
+    // h26?parse externe en aval, NDL avale les samples sans les décoder
+    // → écran noir silencieux. Un capsfilter statique seul ne suffit pas
+    // (link rc=-4 NOFORMAT, refuse la renégo). Il faut un parser actif.
     std::string desc =
         src + " ! " +
         demux + " name=demux "
-        "demux. ! queue max-size-buffers=0 max-size-bytes=33554432 max-size-time=10000000000 ! " +
-        vparse + " config-interval=-1 ! " +
-        vcaps + " ! "
+        "demux. ! queue max-size-buffers=0 max-size-bytes=33554432 max-size-time=10000000000 ! "
+        "parsebin name=vparse "
         // sync=true : GStreamer pace les buffers selon PTS+clock, on les
         // pousse dans NDL au rythme correct. Avec audio HW NDL aussi paçé
         // par sync=true sur asink, la sync A/V est portée par l'horloge
@@ -273,9 +287,14 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
     static std::atomic<int> g_pulse_err_count{0};
     static std::atomic<uint32_t> g_pulse_first_ms{0};
     GstBus* bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline_));
-    gst_bus_add_watch(bus, [](GstBus*, GstMessage* msg, gpointer) -> gboolean {
+    gst_bus_add_watch(bus, [](GstBus*, GstMessage* msg, gpointer user) -> gboolean {
+        auto* self = static_cast<NdlDecoder*>(user);
         const gchar* src = GST_MESSAGE_SRC_NAME(msg) ? GST_MESSAGE_SRC_NAME(msg) : "?";
         switch (GST_MESSAGE_TYPE(msg)) {
+            case GST_MESSAGE_EOS:
+                SDL_Log("[ndl-bus] EOS");
+                if (self) self->eos_.store(true);
+                break;
             case GST_MESSAGE_ERROR: {
                 GError* e = nullptr; gchar* dbg = nullptr;
                 gst_message_parse_error(msg, &e, &dbg);
@@ -333,7 +352,7 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
                 break;
         }
         return TRUE;
-    }, nullptr);
+    }, this);
     gst_object_unref(bus);
 
     GstElement* vsink = gst_bin_get_by_name(GST_BIN(pipeline_), "vsink");
@@ -341,6 +360,12 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
         g_signal_connect(vsink, "new-sample",
                          G_CALLBACK(&NdlDecoder::onVideoSampleStatic), this);
         gst_object_unref(vsink);
+    }
+    GstElement* vparse_el = gst_bin_get_by_name(GST_BIN(pipeline_), "vparse");
+    if (vparse_el) {
+        g_signal_connect(vparse_el, "pad-added",
+                         G_CALLBACK(&NdlDecoder::onVparsePadAddedStatic), this);
+        gst_object_unref(vparse_el);
     }
     GstElement* asink = gst_bin_get_by_name(GST_BIN(pipeline_), "asink");
     if (asink) {
@@ -504,6 +529,74 @@ GstFlowReturn NdlDecoder::onVideoSampleStatic(GstAppSink* sink, void* user) {
     return GST_FLOW_OK;
 }
 
+void NdlDecoder::onVparsePadAddedStatic(GstElement* /*el*/, GstPad* pad,
+                                       gpointer user) {
+    auto* self = static_cast<NdlDecoder*>(user);
+    if (!self || !self->pipeline_) return;
+
+    // Probe caps pour identifier le codec.
+    GstCaps* caps = gst_pad_get_current_caps(pad);
+    if (!caps) caps = gst_pad_query_caps(pad, nullptr);
+    gchar* caps_str = caps ? gst_caps_to_string(caps) : nullptr;
+    SDL_Log("[ndl] vparse pad-added caps=%s", caps_str ? caps_str : "?");
+    if (caps_str) g_free(caps_str);
+
+    bool is_h265 = false;
+    if (caps && gst_caps_get_size(caps) > 0) {
+        GstStructure* s = gst_caps_get_structure(caps, 0);
+        const char* media = gst_structure_get_name(s);
+        is_h265 = media && std::strcmp(media, "video/x-h265") == 0;
+    }
+    if (caps) gst_caps_unref(caps);
+
+    GstElement* vsink = gst_bin_get_by_name(GST_BIN(self->pipeline_), "vsink");
+    if (!vsink) return;
+    GstPad* vsink_pad = gst_element_get_static_pad(vsink, "sink");
+    if (!vsink_pad) { gst_object_unref(vsink); return; }
+    if (gst_pad_is_linked(vsink_pad)) {
+        SDL_Log("[ndl] vparse pad-added: vsink already linked, skip");
+        gst_object_unref(vsink_pad);
+        gst_object_unref(vsink);
+        return;
+    }
+
+    // Crée parser + capsfilter dynamiquement. parsebin sort hvc1/avc1
+    // (format natif container), h26?parse les convertit en byte-stream/au
+    // que NDL_DirectVideoPlay accepte. config-interval=-1 réinjecte
+    // SPS/PPS avant chaque IDR (sinon NDL refuse l'IDR sans config).
+    const char* parser_name = is_h265 ? "h265parse" : "h264parse";
+    GstElement* parser = gst_element_factory_make(parser_name, "vparse_dyn");
+    GstElement* filter = gst_element_factory_make("capsfilter", "vfilter_dyn");
+    if (!parser || !filter) {
+        SDL_Log("[ndl] dynamic parser/filter creation FAILED");
+        if (parser) gst_object_unref(parser);
+        if (filter) gst_object_unref(filter);
+        gst_object_unref(vsink_pad);
+        gst_object_unref(vsink);
+        return;
+    }
+    g_object_set(parser, "config-interval", -1, nullptr);
+    GstCaps* fc = gst_caps_from_string(
+        is_h265 ? "video/x-h265,stream-format=byte-stream,alignment=au"
+                : "video/x-h264,stream-format=byte-stream,alignment=au");
+    g_object_set(filter, "caps", fc, nullptr);
+    gst_caps_unref(fc);
+
+    gst_bin_add_many(GST_BIN(self->pipeline_), parser, filter, nullptr);
+    gst_element_sync_state_with_parent(parser);
+    gst_element_sync_state_with_parent(filter);
+
+    GstPad* parser_sink = gst_element_get_static_pad(parser, "sink");
+    GstPadLinkReturn r1 = gst_pad_link(pad, parser_sink);
+    gst_object_unref(parser_sink);
+    bool ok2 = gst_element_link_many(parser, filter, vsink, nullptr);
+    SDL_Log("[ndl] dynamic chain %s+filter+vsink: link1=%d link2=%d",
+            parser_name, (int)r1, (int)ok2);
+
+    gst_object_unref(vsink_pad);
+    gst_object_unref(vsink);
+}
+
 GstFlowReturn NdlDecoder::onAudioSampleStatic(GstAppSink* sink, void* user) {
     auto* self = static_cast<NdlDecoder*>(user);
     GstSample* sample = gst_app_sink_pull_sample(sink);
@@ -531,6 +624,17 @@ void NdlDecoder::onVideoSample(GstSample* sample) {
         int lw = video_width_, lh = video_height_;
         if (caps && gst_caps_get_size(caps) > 0) {
             GstStructure* s = gst_caps_get_structure(caps, 0);
+            // Auto-detect codec depuis le media name produit par parsebin.
+            // Surcharge le hint reçu en open() (qui pouvait être faux quand
+            // Xtream renvoie pas codec_name → fallback heuristique .mkv⇒h264).
+            const char* media = gst_structure_get_name(s);
+            bool is_h265_real = media && std::strcmp(media, "video/x-h265") == 0;
+            if (is_h265_real != is_h265_) {
+                SDL_Log("[ndl] codec auto-detected from caps: %s (hint was %s)",
+                        is_h265_real ? "H265" : "H264",
+                        is_h265_ ? "H265" : "H264");
+                is_h265_ = is_h265_real;
+            }
             int w = 0, h = 0;
             if (gst_structure_get_int(s, "width", &w) &&
                 gst_structure_get_int(s, "height", &h) && w > 0 && h > 0) {
@@ -603,16 +707,39 @@ void NdlDecoder::onVideoSample(GstSample* sample) {
     }
     if (pts_ns != (long long)GST_CLOCK_TIME_NONE) last_pts_ns_.store(pts_ns);
     sample_count_++;
-    if (sample_count_ % 60 == 0) {
-        int bufl = ndl_bridge_get_render_buffer_length();
-        SDL_Log("[ndl] video samples=%u pts_us=%lld ndl_buf=%d",
-                sample_count_, pts_us, bufl);
+    // Stats inter-arrivée + durée submit NDL pour diagnostiquer la stutter.
+    uint32_t now_ms = SDL_GetTicks();
+    if (last_video_arrival_ms_ > 0) {
+        uint32_t dt = now_ms - last_video_arrival_ms_;
+        v_dt_sum_ += dt; v_dt_count_++;
+        if (dt > v_dt_max_) v_dt_max_ = dt;
+        if (v_dt_min_ == 0 || dt < v_dt_min_) v_dt_min_ = dt;
+        if (dt > 80) v_dt_over80_++;        // 80ms = miss frame at 24fps (41ms expected)
+        if (dt > 150) v_dt_over150_++;      // 150ms = visible stutter
     }
+    last_video_arrival_ms_ = now_ms;
+    uint32_t submit_start = SDL_GetTicks();
     int rc = ndl_bridge_play_video(map.data, (unsigned)map.size, pts_us);
+    uint32_t submit_dur = SDL_GetTicks() - submit_start;
+    v_submit_sum_ += submit_dur; v_submit_count_++;
+    if (submit_dur > v_submit_max_) v_submit_max_ = submit_dur;
     if (rc != 0) {
         last_error_ = ndl_bridge_last_error();
         SDL_Log("[ndl] play_video rc=%d err=%s", rc, last_error_.c_str());
         error_.store(true);
+    }
+    if (sample_count_ % 60 == 0) {
+        int bufl = ndl_bridge_get_render_buffer_length();
+        uint32_t v_dt_avg = v_dt_count_ > 0 ? (uint32_t)(v_dt_sum_ / v_dt_count_) : 0;
+        uint32_t v_sub_avg = v_submit_count_ > 0 ? (uint32_t)(v_submit_sum_ / v_submit_count_) : 0;
+        SDL_Log("[ndl-stat] V smp=%u pts_us=%lld ndl_buf=%d "
+                "dt[min=%u avg=%u max=%u >80=%u >150=%u] submit[avg=%ums max=%ums]",
+                sample_count_, pts_us, bufl,
+                v_dt_min_, v_dt_avg, v_dt_max_, v_dt_over80_, v_dt_over150_,
+                v_sub_avg, v_submit_max_);
+        v_dt_min_ = 0; v_dt_max_ = 0; v_dt_sum_ = 0; v_dt_count_ = 0;
+        v_dt_over80_ = 0; v_dt_over150_ = 0;
+        v_submit_max_ = 0; v_submit_sum_ = 0; v_submit_count_ = 0;
     }
     gst_buffer_unmap(buf, &map);
 }
@@ -628,13 +755,35 @@ void NdlDecoder::onAudioSample(GstSample* sample) {
     if (audio_sample_count_ == 1) {
         SDL_Log("[ndl] first audio sample size=%u pts_us=%lld", (unsigned)map.size, pts_us);
     }
-    if (audio_sample_count_ % 100 == 0) {
-        SDL_Log("[ndl] audio samples=%u pts_us=%lld", audio_sample_count_, pts_us);
+    uint32_t now_ms = SDL_GetTicks();
+    if (last_audio_arrival_ms_ > 0) {
+        uint32_t dt = now_ms - last_audio_arrival_ms_;
+        a_dt_sum_ += dt; a_dt_count_++;
+        if (dt > a_dt_max_) a_dt_max_ = dt;
+        if (a_dt_min_ == 0 || dt < a_dt_min_) a_dt_min_ = dt;
+        if (dt > 80) a_dt_over80_++;
     }
+    last_audio_arrival_ms_ = now_ms;
+    uint32_t submit_start = SDL_GetTicks();
     int rc = ndl_bridge_play_audio_pcm(map.data, (unsigned)map.size, pts_us);
+    uint32_t submit_dur = SDL_GetTicks() - submit_start;
+    a_submit_sum_ += submit_dur; a_submit_count_++;
+    if (submit_dur > a_submit_max_) a_submit_max_ = submit_dur;
     if (rc != 0) {
         last_error_ = ndl_bridge_last_error();
         SDL_Log("[ndl] play_audio rc=%d err=%s", rc, last_error_.c_str());
+    }
+    if (audio_sample_count_ % 100 == 0) {
+        uint32_t a_dt_avg = a_dt_count_ > 0 ? (uint32_t)(a_dt_sum_ / a_dt_count_) : 0;
+        uint32_t a_sub_avg = a_submit_count_ > 0 ? (uint32_t)(a_submit_sum_ / a_submit_count_) : 0;
+        SDL_Log("[ndl-stat] A smp=%u pts_us=%lld size=%u "
+                "dt[min=%u avg=%u max=%u >80=%u] submit[avg=%ums max=%ums]",
+                audio_sample_count_, pts_us, (unsigned)map.size,
+                a_dt_min_, a_dt_avg, a_dt_max_, a_dt_over80_,
+                a_sub_avg, a_submit_max_);
+        a_dt_min_ = 0; a_dt_max_ = 0; a_dt_sum_ = 0; a_dt_count_ = 0;
+        a_dt_over80_ = 0;
+        a_submit_max_ = 0; a_submit_sum_ = 0; a_submit_count_ = 0;
     }
     gst_buffer_unmap(buf, &map);
 }

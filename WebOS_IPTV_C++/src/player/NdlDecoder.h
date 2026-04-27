@@ -59,6 +59,7 @@ public:
     void setStartSeek(int seconds) { start_seek_sec_ = seconds; }
 
     bool hasError() const { return error_.load(); }
+    bool eos() const { return eos_.load(); }
     const std::string& lastError() const { return last_error_; }
     // Nombre de samples vidéo déjà poussés à NDL. Un watchdog côté app
     // peut surveiller ça pour déclencher un fallback (ex : matroskademux
@@ -77,6 +78,10 @@ public:
 private:
     static GstFlowReturn onVideoSampleStatic(GstAppSink* sink, void* user);
     static GstFlowReturn onAudioSampleStatic(GstAppSink* sink, void* user);
+    // parsebin a des pads source dynamiques : ce handler link le pad
+    // vidéo nouvellement créé sur l'appsink "vsink" si pas déjà fait
+    // par le smart-link de gst_parse_launch.
+    static void onVparsePadAddedStatic(GstElement* el, GstPad* pad, gpointer user);
     void onVideoSample(GstSample* sample);
     void onAudioSample(GstSample* sample);
 
@@ -91,7 +96,18 @@ private:
     int start_seek_sec_ = 0;
     GstElement* pipeline_ = nullptr;
     std::atomic<bool> error_{false};
+    std::atomic<bool> eos_{false};
     std::string last_error_;
+
+    // Diag stutter : timings inter-arrivée + durée submit NDL.
+    uint32_t last_video_arrival_ms_ = 0;
+    uint32_t last_audio_arrival_ms_ = 0;
+    uint32_t v_dt_min_ = 0, v_dt_max_ = 0; uint64_t v_dt_sum_ = 0; uint32_t v_dt_count_ = 0;
+    uint32_t v_dt_over80_ = 0, v_dt_over150_ = 0;
+    uint32_t v_submit_max_ = 0; uint64_t v_submit_sum_ = 0; uint32_t v_submit_count_ = 0;
+    uint32_t a_dt_min_ = 0, a_dt_max_ = 0; uint64_t a_dt_sum_ = 0; uint32_t a_dt_count_ = 0;
+    uint32_t a_dt_over80_ = 0;
+    uint32_t a_submit_max_ = 0; uint64_t a_submit_sum_ = 0; uint32_t a_submit_count_ = 0;
     long long first_pts_ns_ = -1;
     std::atomic<long long> last_pts_ns_{-1};  // dernier PTS vidéo vu
     unsigned int sample_count_ = 0;
