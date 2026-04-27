@@ -87,6 +87,11 @@ private:
     // vidéo nouvellement créé sur l'appsink "vsink" si pas déjà fait
     // par le smart-link de gst_parse_launch.
     static void onVparsePadAddedStatic(GstElement* el, GstPad* pad, gpointer user);
+    // parsebin audio (aparsebin) : pad-added avec caps audio parsées. Le
+    // handler crée dynamiquement le décodeur libav (avdec_aac/ac3/eac3/mp3)
+    // et linke parsebin → adec → aconv (premier élément statique du chain
+    // audioconvert→audioresample→asink).
+    static void onAparsebinPadAddedStatic(GstElement* el, GstPad* pad, gpointer user);
     void onVideoSample(GstSample* sample);
     void onAudioSample(GstSample* sample);
 

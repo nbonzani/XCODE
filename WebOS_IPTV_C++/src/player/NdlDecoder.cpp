@@ -58,13 +58,13 @@ bool NdlDecoder::init(const std::string& appId) {
         // pulsesink n'arrive pas à downmixer → "wrong size" en boucle ou
         // son absent. avdec_* de libav sort des caps standards downmixable.
         // Downrank ciblé (noms connus) :
-        // Approche radicale : on REMOVE les factories audio HW LG du registry
-        // (au lieu d'un simple downrank). decodebin3 webOS 6.5 sélectionne
-        // ac3_audiodec/aac_audiodec malgré rank=NONE (test t19 confirme rank=0
-        // mais decodebin3 picke quand même → caps-specificity prime sur rank).
-        // remove_feature les sort entièrement du candidat-set, garantissant
-        // que decodebin3 tombe sur avdec_*.
-        GstRegistry* reg_audio = gst_registry_get();
+        // Test 2026-04-27 : on revient à set_rank(NONE) au lieu de
+        // remove_feature. Hypothèse : la matrice 4K (8 samples HEVC, 1/8 audio
+        // OK) montrait Missing decoder uniquement sur audio 5.1 multichannel.
+        // remove_feature aurait pu sortir les caps converters/downmixers HW
+        // LG nécessaires à decodebin pour normaliser les caps 5.1 avant la
+        // décode SW. set_rank(NONE) garde les factories accessibles via
+        // gst_element_factory_make explicite mais évite leur auto-plug.
         for (const char* name : {"ac3_audiodec", "eac3_audiodec",
                                   "aac_audiodec", "mp3_audiodec",
                                   "ac4_audiodec", "flac_audiodec",
@@ -72,10 +72,10 @@ bool NdlDecoder::init(const std::string& appId) {
                                   "alac_audiodec", "amr_audiodec",
                                   "adpcm_audiodec", "wma_audiodec",
                                   "pcm_audiodec", "mpegh_audiodec"}) {
-            if (GstPluginFeature* f = gst_registry_lookup_feature(reg_audio, name)) {
-                gst_registry_remove_feature(reg_audio, f);
+            if (GstElementFactory* f = gst_element_factory_find(name)) {
+                gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(f), GST_RANK_NONE);
                 gst_object_unref(f);
-                SDL_Log("[ndl] removed %s from registry", name);
+                SDL_Log("[ndl] downranked %s -> NONE", name);
             }
         }
         // Downrank générique : tout factory dont le nom commence par
@@ -250,15 +250,21 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
                        "audio/x-raw,format=S16LE,channels=2,rate=48000 ! "
                        "appsink name=asink emit-signals=true sync=true max-buffers=0 drop=false";
     } else {
-        // Fallback : decodebin avec les *_audiodec HW LG REMOVED du registry +
-        // signal autoplug-select pour bloquer les lxaudiodec* survivants.
-        // Décision (test t22) : sans audio_codec hint explicite, decodebin
-        // webOS 6.5 plante en "missing plug-in" sur AAC, mais EAC3 passe via
-        // avdec_eac3. On laisse decodebin essayer ; si AAC, l'audio sera muet.
-        // Une bascule vers une chaîne aacparse+avdec_aac dynamique selon les
-        // caps demux serait propre mais demande un refactor pad-added complet.
+        // Fallback : parsebin audio + decoder dynamique en pad-added (cf
+        // onAparsebinPadAddedStatic). On bypass complètement decodebin parce
+        // que sur webOS 6.5 il échoue en "missing plug-in" pour les caps
+        // 5.1 multichannel (matrice 4K cat 43 : 7/8 V_only, audio AC-3/AAC
+        // 5.1 KO, seul AAC stéréo passait). parsebin sort un pad parsé avec
+        // caps précises (audio/mpeg, audio/x-ac3, audio/x-eac3, etc.) que
+        // notre handler convertit en chaîne explicite avdec_X → asink, en
+        // injectant un capsfilter `channel-mask=0x3` AVANT le downmix pour
+        // pousser audioconvert à faire un downmix 5.1→2 propre.
+        // Le reste de la chaîne (audioconvert→audioresample→capsfilter→asink)
+        // est créé en parallèle via la string parse_launch ; pad-added link
+        // parsebin.src → adec.sink → aconv.sink (premier élément statique).
         audio_branch =
-            " demux. ! queue ! decodebin name=adecbin ! audioconvert ! audioresample ! "
+            " demux. ! queue ! parsebin name=aparsebin "
+            "audioconvert name=aconv ! audioresample ! "
             "audio/x-raw,format=S16LE,channels=2,rate=48000 ! "
             "appsink name=asink emit-signals=true sync=true max-buffers=0 drop=false";
     }
@@ -409,33 +415,14 @@ bool NdlDecoder::open(const std::string& uri, int width, int height,
                          G_CALLBACK(&NdlDecoder::onAudioSampleStatic), this);
         gst_object_unref(asink);
     }
-    // autoplug-select + autoplug-factories sur decodebin audio : on retire
-    // les décodeurs HW LG (`*_audiodec`, élément nommé lxaudiodec*) du
-    // candidat-set car ils stallent en PAUSED au 2e play (le 1er play ne
-    // libère pas leur contexte HW). avdec_* côté gst-libav fonctionne à
-    // chaque play sans état pollué. autoplug-factories filtre AVANT que
-    // decodebin demande autoplug-select, ce qui garantit qu'il considère
-    // bien les fallbacks (sinon decodebin abandonne avec "missing plug-in"
-    // si on lui SKIP le seul candidat).
-    GstElement* adecbin = gst_bin_get_by_name(GST_BIN(pipeline_), "adecbin");
-    if (adecbin) {
-        // autoplug-select : le plus simple — laisser decodebin construire son
-        // candidat-set par défaut, on filtre case-par-case via SKIP. Si on lui
-        // donne TROP de candidats via autoplug-factories (ex. inplacedecryptor
-        // sans intent), il loop sur l'auto-plug de ces éléments parasites.
-        g_signal_connect(adecbin, "autoplug-select",
-            G_CALLBACK(+[](GstElement*, GstPad*, GstCaps*,
-                           GstElementFactory* factory, gpointer) -> gint {
-                const gchar* fname = factory ? gst_plugin_feature_get_name(
-                    GST_PLUGIN_FEATURE(factory)) : nullptr;
-                if (fname && (g_str_has_suffix(fname, "_audiodec") ||
-                              g_str_has_prefix(fname, "lxaudiodec"))) {
-                    SDL_Log("[ndl] autoplug-select SKIP %s (HW LG)", fname);
-                    return 2;  // GST_AUTOPLUG_SELECT_SKIP
-                }
-                return 0;  // GST_AUTOPLUG_SELECT_TRY
-            }), nullptr);
-        gst_object_unref(adecbin);
+    // parsebin audio (aparsebin) : pad-added → on attache dynamiquement le
+    // bon avdec_* en fonction des caps. Bypass complet de decodebin (qui
+    // tombait en "missing plug-in" sur audio 5.1 multichannel webOS 6.5).
+    GstElement* aparsebin = gst_bin_get_by_name(GST_BIN(pipeline_), "aparsebin");
+    if (aparsebin) {
+        g_signal_connect(aparsebin, "pad-added",
+                         G_CALLBACK(&NdlDecoder::onAparsebinPadAddedStatic), this);
+        gst_object_unref(aparsebin);
     }
 
     // DirectMediaLoad est déplacé vers play() : on a besoin des vraies caps
@@ -705,6 +692,84 @@ void NdlDecoder::onVparsePadAddedStatic(GstElement* /*el*/, GstPad* pad,
 
     gst_object_unref(vsink_pad);
     gst_object_unref(vsink);
+}
+
+void NdlDecoder::onAparsebinPadAddedStatic(GstElement* /*el*/, GstPad* pad,
+                                           gpointer user) {
+    auto* self = static_cast<NdlDecoder*>(user);
+    if (!self || !self->pipeline_) return;
+    GstCaps* caps = gst_pad_get_current_caps(pad);
+    if (!caps) caps = gst_pad_query_caps(pad, nullptr);
+    gchar* caps_str = caps ? gst_caps_to_string(caps) : nullptr;
+    SDL_Log("[ndl] aparsebin pad-added caps=%s", caps_str ? caps_str : "?");
+    if (caps_str) g_free(caps_str);
+
+    const char* media = nullptr;
+    int mpegversion = 0;
+    if (caps && gst_caps_get_size(caps) > 0) {
+        GstStructure* s = gst_caps_get_structure(caps, 0);
+        media = gst_structure_get_name(s);
+        gst_structure_get_int(s, "mpegversion", &mpegversion);
+    }
+    if (!media) {
+        if (caps) gst_caps_unref(caps);
+        SDL_Log("[ndl] aparsebin: caps without media name, skip");
+        return;
+    }
+    // Map caps → factory libav.
+    const char* dec_name = nullptr;
+    if (std::strcmp(media, "audio/mpeg") == 0) {
+        dec_name = (mpegversion == 1) ? "avdec_mp3" : "avdec_aac";
+    } else if (std::strcmp(media, "audio/x-eac3") == 0) {
+        dec_name = "avdec_eac3";
+    } else if (std::strcmp(media, "audio/x-ac3") == 0) {
+        dec_name = "avdec_ac3";
+    } else if (std::strcmp(media, "audio/x-dts") == 0 ||
+               std::strcmp(media, "audio/x-dca") == 0) {
+        SDL_Log("[ndl] aparsebin: DTS audio non supporté, skip");
+        if (caps) gst_caps_unref(caps);
+        return;
+    }
+    if (caps) gst_caps_unref(caps);
+    if (!dec_name) {
+        SDL_Log("[ndl] aparsebin: codec %s non géré, skip", media);
+        return;
+    }
+
+    GstElement* aconv = gst_bin_get_by_name(GST_BIN(self->pipeline_), "aconv");
+    if (!aconv) {
+        SDL_Log("[ndl] aparsebin: aconv NOT FOUND");
+        return;
+    }
+    GstPad* aconv_sink = gst_element_get_static_pad(aconv, "sink");
+    if (gst_pad_is_linked(aconv_sink)) {
+        SDL_Log("[ndl] aparsebin: aconv déjà linké, skip (re-emit caps)");
+        gst_object_unref(aconv_sink);
+        gst_object_unref(aconv);
+        return;
+    }
+
+    GstElement* adec = gst_element_factory_make(dec_name, "adec_dyn");
+    if (!adec) {
+        SDL_Log("[ndl] aparsebin: création %s FAILED", dec_name);
+        gst_object_unref(aconv_sink);
+        gst_object_unref(aconv);
+        return;
+    }
+    gst_bin_add(GST_BIN(self->pipeline_), adec);
+
+    GstPad* adec_sink = gst_element_get_static_pad(adec, "sink");
+    GstPadLinkReturn r1 = gst_pad_link(pad, adec_sink);
+    gst_object_unref(adec_sink);
+    bool ok2 = gst_element_link(adec, aconv);
+
+    gboolean sr = gst_element_sync_state_with_parent(adec);
+
+    SDL_Log("[ndl] aparsebin dynamic chain %s -> aconv: link1=%d link2=%d sync=%d",
+            dec_name, (int)r1, (int)ok2, (int)sr);
+
+    gst_object_unref(aconv_sink);
+    gst_object_unref(aconv);
 }
 
 GstFlowReturn NdlDecoder::onAudioSampleStatic(GstAppSink* sink, void* user) {
