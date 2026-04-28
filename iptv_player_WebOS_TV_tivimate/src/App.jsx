@@ -33,6 +33,7 @@ import SettingsScreen       from './screens/SettingsScreen.jsx';
 import SeriesDetailScreen   from './screens/SeriesDetailScreen.jsx';
 import PlayerScreen         from './screens/PlayerScreen.jsx';
 import CatalogFilterScreen  from './screens/CatalogFilterScreen.jsx';
+import TestXvidScreen       from './screens/TestXvidScreen.jsx';
 
 // Import du store Zustand pour vérifier si l'application est configurée
 // et rediriger vers SettingsScreen au premier lancement.
@@ -173,6 +174,9 @@ export default function App() {
             Route de rattrapage : toute URL inconnue redirige vers /.
             RequireConfig s'occupera du cas "non configuré".
           */}
+          {/* Route de test libav.js — dev uniquement */}
+          <Route path="/test-xvid" element={<TestXvidScreen />} />
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
     </HashRouter>

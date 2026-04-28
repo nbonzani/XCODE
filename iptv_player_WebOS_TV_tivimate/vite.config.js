@@ -9,7 +9,8 @@ function webosPlugin() {
     enforce: 'post',
     transformIndexHtml: {
       enforce: 'post',
-      transform(html) {
+      transform(html, ctx) {
+        if (!ctx.bundle) return html; // dev server — ne pas toucher
         return html
           .replace(/ type="module"/g, '')
           .replace(/ crossorigin/g, '');

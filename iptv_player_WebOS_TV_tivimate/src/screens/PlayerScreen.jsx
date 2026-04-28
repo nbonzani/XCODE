@@ -31,6 +31,7 @@ import { useNavigate } from 'react-router-dom';
 import Hls from 'hls.js';
 import WebOSMediaPipeline, { canPlayNatively } from '../services/webosMedia.js';
 import MkvMsePlayer from '../services/mkvMsePlayer.js';
+import LibavXvidPlayer from '../services/libavXvidPlayer.js';
 import { usePlayerStore } from '../store/playerStore.js';
 import { KEY, isBackKey } from '../constants/keyCodes.js';
 import { saveWatchPosition, clearWatchPosition } from '../services/watchPositionService.js';
@@ -268,6 +269,9 @@ export default function PlayerScreen() {
   var videoHasPlayedRef     = useRef(false); // true dès le premier onPlaying
   var webosRef              = useRef(null);  // instance WebOSMediaPipeline active
   var mkvMseRef             = useRef(null);  // instance MkvMsePlayer active
+  var libavRef              = useRef(null);  // instance LibavXvidPlayer active
+  var xvidCanvasRef         = useRef(null);  // canvas WebGL pour XVID
+  var _xv = useState(false); var xvidMode = _xv[0]; var setXvidMode = _xv[1];
   var nativeCurrentTimeRef  = useRef(0);     // currentTime suivi via pipeline natif
   var nativeDurationRef     = useRef(0);     // durée suivie via pipeline natif
 
@@ -549,10 +553,44 @@ export default function PlayerScreen() {
             setPlayerError('Erreur de lecture : ' + err);
           },
           onUnsupported: function(reason) {
-            console.warn('[MSE] codec non supporté:', reason);
-            setPlayerError('Format non supporté par ce TV');
+            console.warn('[MSE] codec non supporté:', reason, '→ libav XVID');
+            switchToLibavXvid();
           },
         });
+      };
+
+      // ── Fallback LibavXvidPlayer (MPEG-4 Part 2 / XVID) ──────────────────
+      var switchToLibavXvid = function() {
+        console.warn('[Player] → LibavXvidPlayer (MPEG-4 Part 2 WASM)');
+        video.removeAttribute('src'); video.load();
+        if (mkvMseRef.current) { mkvMseRef.current.destroy(); mkvMseRef.current = null; }
+        if (libavRef.current)  { libavRef.current.destroy();  libavRef.current  = null; }
+        setPlayerError(null);
+        setXvidMode(true);
+
+        // Attendre que le canvas soit monté dans le DOM
+        setTimeout(function() {
+          if (!xvidCanvasRef.current) {
+            setPlayerError('Canvas XVID non disponible');
+            return;
+          }
+          var xvid = new LibavXvidPlayer(xvidCanvasRef.current);
+          libavRef.current = xvid;
+          xvid.load(url, seekTo || 0, {
+            onLoaded: function() { console.warn('[XVID] lecture démarrée'); },
+            onTimeUpdate: function(t) { setCurrentTime(t); },
+            onError: function(err) {
+              console.warn('[XVID] erreur:', err);
+              setXvidMode(false);
+              setPlayerError('Format non supporté par ce TV');
+            },
+            onUnsupported: function(reason) {
+              console.warn('[XVID] non supporté:', reason);
+              setXvidMode(false);
+              setPlayerError('Format non supporté par ce TV');
+            },
+          });
+        }, 100);
       };
 
       // ── Attacher le <video> HTML5 ──────────────────────────────────────────
@@ -580,8 +618,8 @@ export default function PlayerScreen() {
             if (ext === 'mkv' || ext === 'webm' || ext === 'avi' || ext === 'wmv' || ext === 'flv' || ext === 'mov') {
               switchToMkvMse();
             } else {
-              console.warn('[Player] format non supporté par aucune méthode');
-              setPlayerError('Format non supporté par ce TV');
+              console.warn('[Player] tentative libav XVID');
+              switchToLibavXvid();
             }
           }
         };
@@ -640,6 +678,7 @@ export default function PlayerScreen() {
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
       if (webosRef.current) { webosRef.current.unload(); webosRef.current = null; }
       if (mkvMseRef.current) { mkvMseRef.current.destroy(); mkvMseRef.current = null; }
+      if (libavRef.current)  { libavRef.current.destroy();  libavRef.current  = null; }
       document.body.classList.remove('native-player');
     };
   }, [streamUrl]);
@@ -744,6 +783,11 @@ export default function PlayerScreen() {
       mkvMseRef.current.destroy();
       mkvMseRef.current = null;
     }
+    if (libavRef.current) {
+      libavRef.current.destroy();
+      libavRef.current = null;
+    }
+    setXvidMode(false);
     if (useNative && webosRef.current) {
       saveWatchPosition(itemId, nativeCurrentTimeRef.current, nativeDurationRef.current);
       webosRef.current.unload();
@@ -838,6 +882,18 @@ export default function PlayerScreen() {
           <div style={{fontSize:'var(--font-size-sm)',color:'rgba(255,255,255,0.5)'}}>Appuyez sur Retour pour quitter</div>
         </div>
       )}
+
+      {/* Canvas WebGL pour MPEG-4 Part 2 / XVID via libav.js */}
+      <canvas
+        ref={xvidCanvasRef}
+        style={{
+          position: 'absolute', inset: 0,
+          width: '100%', height: '100%',
+          display: xvidMode ? 'block' : 'none',
+          zIndex: 1,
+          backgroundColor: '#000',
+        }}
+      />
 
       {/* En mode pipeline natif, la vidéo est rendue sur le plan hardware sous la couche HTML */}
       <video
