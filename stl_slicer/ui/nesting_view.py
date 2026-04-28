@@ -11,6 +11,8 @@
 #   - Mise à jour en temps réel de self._placements (partagé avec MainWindow)
 # =============================================================================
 
+import math
+
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import Qt, QPointF, QRectF, QPoint
 from PyQt6.QtGui import (
@@ -27,6 +29,46 @@ COULEURS = [
     '#CE93D8', '#80CBC4', '#FFCC02', '#FF8A65',
     '#90CAF9', '#A5D6A7', '#FFAB91', '#B39DDB',
 ]
+
+
+# =============================================================================
+# Helpers géométriques pour le rendu Qt des arcs
+# =============================================================================
+
+def _arc_qt_angles(p_start: Tuple[float, float],
+                   p_end:   Tuple[float, float],
+                   p_mid:   Tuple[float, float],
+                   cx: float, cy: float) -> Tuple[float, float]:
+    """
+    Convertit un arc (p_start → p_mid → p_end) autour de (cx, cy) en angles
+    (start_deg, span_deg) compatibles avec QPainterPath.arcTo / QPainter.drawArc.
+
+    Convention Qt :
+      - 0° = 3 h (positif X)
+      - Positif = sens anti-horaire VISUEL à l'écran
+    Convention shapely :
+      - Y croît vers le haut (sens anti-horaire mathématique)
+    Comme la vue effectue une symétrie Y à l'affichage, un arc parcouru en sens
+    anti-horaire dans shapely est aussi anti-horaire VISUELLEMENT à l'écran.
+    Les angles atan2 calculés directement sur (y - cy, x - cx) shapely sont
+    donc utilisables tels quels par Qt.
+    """
+    a_s = math.atan2(p_start[1] - cy, p_start[0] - cx)
+    a_m = math.atan2(p_mid[1]   - cy, p_mid[0]   - cx)
+    a_e = math.atan2(p_end[1]   - cy, p_end[0]   - cx)
+
+    two_pi = 2.0 * math.pi
+    d_mid_ccw = (a_m - a_s) % two_pi
+    d_end_ccw = (a_e - a_s) % two_pi
+
+    if d_mid_ccw < d_end_ccw:
+        # Arc parcouru en CCW (shapely sens trigo) → CCW visuel → Qt positif
+        span = d_end_ccw
+    else:
+        # Arc parcouru en CW → Qt négatif
+        span = -(two_pi - d_end_ccw)
+
+    return math.degrees(a_s), math.degrees(span)
 
 
 class NestingView(QWidget):
@@ -80,8 +122,17 @@ class NestingView(QWidget):
         self.DEG_PAR_PIXEL = 0.4               # sensibilité : 0.4°/pixel
 
         # --- Contrainte d'espacement ---
-        self._espacement: float = 0.0          # distance minimum pièce-pièce et pièce-bord (mm)
+        self._espacement: float = 0.0          # distance minimum entre pièces (mm)
+        self._espacement_bord: float = 0.0     # distance minimum pièces/bord (mm)
         self._drag_bloque: bool = False         # True si le dernier mouvement a été bloqué
+
+        # --- Prévisualisation du lissage (None = désactivée) ---
+        # Parallèle à _placements. Pour chaque placement i, _entites_lisses[i] est
+        # la structure retournée par core.lissage.lisser_polygone :
+        #   [entites_anneau_ext, entites_trou_1, ...]
+        # où chaque liste d'entités contient des tuples ('line', p0, p1),
+        # ('arc', (cx,cy), r, p_start, p_end, p_mid) ou ('circle', (cx,cy), r).
+        self._entites_lisses: Optional[List[List[list]]] = None
 
     # =========================================================================
     # Méthodes publiques
@@ -95,8 +146,12 @@ class NestingView(QWidget):
         self.update()
 
     def definir_espacement(self, espacement: float):
-        """Définit l'espacement minimum à respecter lors des déplacements manuels."""
+        """Définit l'espacement minimum entre pièces (déplacements manuels)."""
         self._espacement = max(0.0, espacement)
+
+    def definir_espacement_bord(self, espacement_bord: float):
+        """Définit l'espacement minimum pièces/bord (déplacements manuels)."""
+        self._espacement_bord = max(0.0, espacement_bord)
 
     def definir_placements(self, placements: list, nb_non_places: int = 0):
         """
@@ -107,6 +162,26 @@ class NestingView(QWidget):
         """
         self._placements = placements
         self._nb_non_places = nb_non_places
+        # Une nouvelle liste de placements invalide toute prévisualisation de lissage
+        self._entites_lisses = None
+        self.update()
+
+    def definir_entites_lisses(self, entites_par_placement: Optional[list]):
+        """
+        Active/met à jour la prévisualisation du lissage.
+
+        Paramètre :
+            entites_par_placement :
+              - None              → désactive la prévisualisation (affichage normal)
+              - liste parallèle à _placements : pour chaque placement, la
+                structure [entites_anneau_ext, entites_trou_1, ...]
+        """
+        self._entites_lisses = entites_par_placement
+        self.update()
+
+    def effacer_lissage(self):
+        """Désactive la prévisualisation du lissage."""
+        self._entites_lisses = None
         self.update()
 
     def effacer(self):
@@ -115,6 +190,7 @@ class NestingView(QWidget):
         self._largeur_plaque = 0.0
         self._hauteur_plaque = 0.0
         self._nb_non_places = 0
+        self._entites_lisses = None
         self._reinitialiser_vue()
         self.update()
 
@@ -129,7 +205,9 @@ class NestingView(QWidget):
             return
 
         facteur = 1.20 if event.angleDelta().y() > 0 else 1.0 / 1.20
-        nouveau_zoom = max(0.05, min(50.0, self._zoom * facteur))
+        # Plage de zoom large : 0.02 × (dézoom extrême) → 2000 × (vue microscopique
+        # sur un arc pour valider le lissage à la précision près).
+        nouveau_zoom = max(0.02, min(2000.0, self._zoom * facteur))
 
         # Garder le point sous la souris fixe visuellement
         mx = event.position().x()
@@ -308,17 +386,26 @@ class NestingView(QWidget):
         self._dessiner_grille(painter, ox, oy, e)
 
         # --- Passe 1 : contours et fonds des sections ---
+        use_lissage = (self._entites_lisses is not None
+                       and len(self._entites_lisses) == len(self._placements))
         for i, (poly, _ox_mm, _oy_mm, idx_original) in enumerate(self._placements):
             est_selectionne = (i == self._drag_idx)
             en_rotation     = (i == self._rotate_idx)
             est_bloque      = self._drag_bloque and (est_selectionne or en_rotation)
-            self._dessiner_polygone(
-                painter, poly, e, ox, oy,
-                COULEURS[i % len(COULEURS)],
-                est_selectionne,
-                en_rotation,
-                est_bloque
-            )
+            couleur         = COULEURS[i % len(COULEURS)]
+            if use_lissage:
+                self._dessiner_polygone_lisse(
+                    painter, self._entites_lisses[i], e, ox, oy,
+                    couleur, est_selectionne, en_rotation, est_bloque
+                )
+            else:
+                self._dessiner_polygone(
+                    painter, poly, e, ox, oy,
+                    couleur,
+                    est_selectionne,
+                    en_rotation,
+                    est_bloque
+                )
 
         # --- Passe 2 : numéros de section (toujours au premier plan) ---
         for i, (poly, _ox_mm, _oy_mm, idx_original) in enumerate(self._placements):
@@ -444,6 +531,176 @@ class NestingView(QWidget):
 
         painter.drawPath(path)
 
+    def _dessiner_polygone_lisse(
+        self,
+        painter: QPainter,
+        anneaux_entites: list,
+        e: float,
+        ox: float,
+        oy: float,
+        couleur_hex: str,
+        selectionne: bool = False,
+        en_rotation: bool = False,
+        bloque: bool = False
+    ):
+        """
+        Dessine un polygone depuis sa liste d'entités lissées
+        (retournée par core.lissage.lisser_polygone).
+
+        Entités supportées :
+          ('line',   p0, p1)                                → lineTo
+          ('arc',    (cx,cy), r, p_start, p_end, p_mid)     → arcTo
+          ('circle', (cx,cy), r)                            → addEllipse
+
+        Rendu en deux passes :
+          1. Chemin complet (fond + contour) avec un pen « normal ».
+          2. Sur-tracé des arcs et cercles avec un pen plus épais, pour
+             faire ressortir visuellement les zones lissées.
+
+        Un anneau composé d'un unique 'circle' est rendu comme cercle plein.
+        Les arcs en milieu de polyligne sont rendus via QPainterPath.arcTo.
+        Les trous (anneaux intérieurs) sont soustraits du chemin extérieur.
+        """
+        couleur = QColor(couleur_hex)
+        if bloque:
+            pen_base   = QPen(QColor('#EF5350'), 2.5, Qt.PenStyle.SolidLine)
+            pen_courbe = QPen(QColor('#EF5350'), 4.0, Qt.PenStyle.SolidLine)
+            couleur_fond = QColor(239, 83, 80, 120)
+        elif en_rotation:
+            pen_base   = QPen(QColor('#FFA726'), 2.2, Qt.PenStyle.DashLine)
+            pen_courbe = QPen(QColor('#FFA726'), 3.5, Qt.PenStyle.SolidLine)
+            couleur_fond = QColor(255, 167, 38, 110)
+        elif selectionne:
+            pen_base   = QPen(couleur, 2.5)
+            pen_courbe = QPen(couleur, 4.0)
+            couleur_fond = QColor(couleur.red(), couleur.green(),
+                                  couleur.blue(), 130)
+        else:
+            # Lignes fines (identiques au rendu normal), arcs/cercles
+            # épaissis pour que la partie lissée saute aux yeux.
+            pen_base   = QPen(couleur, 1.2)
+            pen_courbe = QPen(couleur, 3.0)
+            couleur_fond = QColor(couleur.red(), couleur.green(),
+                                  couleur.blue(), 55)
+        pen_courbe.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen_courbe.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+
+        # --- Passe 1 : fond + trait fin sur tout le contour ---
+        painter.setPen(pen_base)
+        painter.setBrush(QBrush(couleur_fond))
+
+        path_total = QPainterPath()
+        for ring_idx, entites in enumerate(anneaux_entites):
+            if not entites:
+                continue
+            sub = self._construire_path_anneau(entites, e, ox, oy)
+            if sub.isEmpty():
+                continue
+            if ring_idx == 0:
+                path_total.addPath(sub)
+            else:
+                # Anneau intérieur → trou : soustraction
+                path_total = path_total.subtracted(sub)
+
+        painter.drawPath(path_total)
+
+        # --- Passe 2 : sur-tracé épaissi des arcs et cercles seulement ---
+        painter.setPen(pen_courbe)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for entites in anneaux_entites:
+            for ent in entites:
+                if ent[0] == 'arc':
+                    _, (cx, cy), r, p_start, p_end, p_mid = ent
+                    cx_px = ox + cx * e
+                    cy_px = oy + (self._hauteur_plaque - cy) * e
+                    r_px  = r * e
+                    rect  = QRectF(cx_px - r_px, cy_px - r_px,
+                                   2.0 * r_px, 2.0 * r_px)
+                    start_deg, span_deg = _arc_qt_angles(
+                        p_start, p_end, p_mid, cx, cy
+                    )
+                    # QPainter.drawArc : angles en 1/16 de degré
+                    painter.drawArc(rect,
+                                    int(round(start_deg * 16)),
+                                    int(round(span_deg * 16)))
+                elif ent[0] == 'circle':
+                    _, (cx, cy), r = ent
+                    cx_px = ox + cx * e
+                    cy_px = oy + (self._hauteur_plaque - cy) * e
+                    r_px  = r * e
+                    painter.drawEllipse(QPointF(cx_px, cy_px), r_px, r_px)
+
+    def _construire_path_anneau(self, entites: list,
+                                 e: float, ox: float, oy: float) -> QPainterPath:
+        """
+        Construit un QPainterPath fermé représentant un anneau d'entités
+        (lignes/arcs/cercles). Les coordonnées shapely (Y croissant vers
+        le haut) sont transformées en coordonnées écran (Y croissant vers
+        le bas).
+        """
+        sub = QPainterPath()
+
+        # Cas spécial : un seul cercle pour tout l'anneau
+        if len(entites) == 1 and entites[0][0] == 'circle':
+            _, (cx, cy), r = entites[0]
+            cx_px = ox + cx * e
+            cy_px = oy + (self._hauteur_plaque - cy) * e
+            r_px  = r * e
+            sub.addEllipse(QPointF(cx_px, cy_px), r_px, r_px)
+            return sub
+
+        # Point de départ de l'anneau = premier point de la première entité
+        ent0 = entites[0]
+        if ent0[0] == 'line':
+            x0, y0 = ent0[1]
+        elif ent0[0] == 'arc':
+            x0, y0 = ent0[3]        # p_start
+        else:  # 'circle' au milieu d'un mélange — rare
+            _, (cx, cy), r = ent0
+            # Démarrer à (cx + r, cy) comme point arbitraire
+            x0, y0 = cx + r, cy
+
+        px0 = ox + x0 * e
+        py0 = oy + (self._hauteur_plaque - y0) * e
+        sub.moveTo(px0, py0)
+
+        for ent in entites:
+            typ = ent[0]
+
+            if typ == 'line':
+                _, _p0, p1 = ent
+                x1, y1 = p1
+                px1 = ox + x1 * e
+                py1 = oy + (self._hauteur_plaque - y1) * e
+                sub.lineTo(px1, py1)
+
+            elif typ == 'arc':
+                _, (cx, cy), r, p_start, p_end, p_mid = ent
+                cx_px = ox + cx * e
+                cy_px = oy + (self._hauteur_plaque - cy) * e
+                r_px  = r * e
+                rect  = QRectF(cx_px - r_px, cy_px - r_px,
+                               2.0 * r_px, 2.0 * r_px)
+                start_deg, span_deg = _arc_qt_angles(
+                    p_start, p_end, p_mid, cx, cy
+                )
+                # arcTo ajoute automatiquement une ligne de la position
+                # courante vers le début de l'arc s'il y a un écart.
+                sub.arcTo(rect, start_deg, span_deg)
+
+            elif typ == 'circle':
+                # Cercle imbriqué dans une polyligne : cas rare → ajouter
+                # comme sous-ellipse indépendante (n'affecte pas le tracé
+                # courant, mais sera quand même affiché).
+                _, (cx, cy), r = ent
+                cx_px = ox + cx * e
+                cy_px = oy + (self._hauteur_plaque - cy) * e
+                r_px  = r * e
+                sub.addEllipse(QPointF(cx_px, cy_px), r_px, r_px)
+
+        sub.closeSubpath()
+        return sub
+
     def _dessiner_numero(
         self,
         painter: QPainter,
@@ -466,7 +723,8 @@ class NestingView(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setBackgroundMode(Qt.BGMode.TransparentMode)
         painter.setPen(QPen(Qt.GlobalColor.white))
-        taille_fonte = max(7, int(9 * self._zoom))
+        # Taille bornée à 36 pt pour éviter un texte géant aux forts zooms
+        taille_fonte = max(7, min(36, int(9 * self._zoom)))
         painter.setFont(QFont('Segoe UI', taille_fonte, QFont.Weight.Bold))
         painter.drawText(
             QRectF(cx - 20, cy - 11, 40, 22),
@@ -512,14 +770,22 @@ class NestingView(QWidget):
           - une cote verticale centrée à droite   (hauteur en mm)
           - un badge en coin supérieur droit       (surface en cm²)
         """
-        # --- Calcul de la boîte englobante (mm) ---
-        min_x = min(p.bounds[0] for p, *_ in self._placements)
-        min_y = min(p.bounds[1] for p, *_ in self._placements)
-        max_x = max(p.bounds[2] for p, *_ in self._placements)
-        max_y = max(p.bounds[3] for p, *_ in self._placements)
+        # --- Calcul de la boîte englobante pièces + marge bord (mm) ---
+        # La bbox est étendue de espacement_bord sur les 4 côtés :
+        # elle représente la taille de tôle minimale et touche le bord de la tôle.
+        epb = self._espacement_bord
+        raw_min_x = min(p.bounds[0] for p, *_ in self._placements)
+        raw_min_y = min(p.bounds[1] for p, *_ in self._placements)
+        raw_max_x = max(p.bounds[2] for p, *_ in self._placements)
+        raw_max_y = max(p.bounds[3] for p, *_ in self._placements)
 
-        bw = max_x - min_x   # largeur  (mm)
-        bh = max_y - min_y   # hauteur  (mm)
+        min_x = raw_min_x - epb
+        min_y = raw_min_y - epb
+        max_x = raw_max_x + epb
+        max_y = raw_max_y + epb
+
+        bw = max_x - min_x   # largeur tôle min (mm)
+        bh = max_y - min_y   # hauteur tôle min (mm)
         aire_cm2 = bw * bh / 100.0  # mm² → cm²
 
         # --- Coordonnées écran de la boîte ---
@@ -539,7 +805,7 @@ class NestingView(QWidget):
 
         # Police commune pour les annotations
         painter.setBackgroundMode(Qt.BGMode.TransparentMode)
-        font_cote = QFont('Segoe UI', max(7, int(8 * self._zoom)))
+        font_cote = QFont('Segoe UI', max(7, min(24, int(8 * self._zoom))))
         painter.setFont(font_cote)
 
         MARGE = 4   # px entre le trait et le texte
@@ -590,7 +856,7 @@ class NestingView(QWidget):
         else:
             texte_aire = f"{aire_cm2:.2f} cm²"
 
-        font_badge = QFont('Segoe UI', max(7, int(8 * self._zoom)),
+        font_badge = QFont('Segoe UI', max(7, min(24, int(8 * self._zoom))),
                            QFont.Weight.Bold)
         painter.setFont(font_badge)
         tw_aire = painter.fontMetrics().horizontalAdvance(texte_aire)
@@ -713,20 +979,21 @@ class NestingView(QWidget):
         Utilise un pré-filtre bounding-box avant le test géométrique complet,
         identique à la stratégie employée dans core/nesting.py.
         """
-        esp = self._espacement
+        esp      = self._espacement
+        esp_bord = self._espacement_bord
         minx, miny, maxx, maxy = poly.bounds
 
-        # --- 1. Contrainte plaque ---
-        if minx < esp - 1e-6:
+        # --- 1. Contrainte plaque (espacement_bord) ---
+        if minx < esp_bord - 1e-6:
             return False
-        if miny < esp - 1e-6:
+        if miny < esp_bord - 1e-6:
             return False
-        if maxx > self._largeur_plaque - esp + 1e-6:
+        if maxx > self._largeur_plaque - esp_bord + 1e-6:
             return False
-        if maxy > self._hauteur_plaque - esp + 1e-6:
+        if maxy > self._hauteur_plaque - esp_bord + 1e-6:
             return False
 
-        # Si espacement = 0, pas de test inter-pièces nécessaire
+        # Si espacement inter-pièces = 0, pas de test inter-pièces nécessaire
         if esp <= 0.0:
             return True
 
@@ -765,6 +1032,8 @@ class NestingView(QWidget):
 
         self._drag_bloque = not valide
         self._placements[idx] = (new_poly, ox_mm + dx_mm, oy_mm + dy_mm, idx_orig)
+        # Invalide la prévisualisation de lissage (géométrie modifiée)
+        self._entites_lisses = None
 
     def _faire_pivoter_section(self, idx: int, angle_deg: float):
         """
@@ -803,3 +1072,5 @@ class NestingView(QWidget):
 
         self._drag_bloque = not valide
         self._placements[idx] = (new_poly, ox_mm, oy_mm, idx_orig)
+        # Invalide la prévisualisation de lissage (géométrie modifiée)
+        self._entites_lisses = None

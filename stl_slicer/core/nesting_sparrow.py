@@ -60,7 +60,8 @@ def preparer_metas(polygones: List[Polygon]) -> list:
 
 def placer_depuis_solution(placed_items, metas: list,
                             largeur_plaque: float,
-                            hauteur_plaque: float) -> Tuple[List[PlacementType], bool]:
+                            hauteur_plaque: float,
+                            espacement_bord: float = 0.0) -> Tuple[List[PlacementType], bool]:
     """
     Convertit la liste placed_items d'une StripPackingSolution en
     liste de PlacementType (polygone_placé, tx, ty, idx_original).
@@ -72,10 +73,19 @@ def placer_depuis_solution(placed_items, metas: list,
         metas          : liste retournée par preparer_metas()
         largeur_plaque : largeur maximale de la plaque (mm)
         hauteur_plaque : hauteur maximale de la plaque (mm)
+        espacement_bord: marge minimale pièces/bord (mm).
+                         Décale toutes les pièces de (+epb, +epb) pour
+                         garantir la marge côté gauche et bas.
+                         spyrrow doit recevoir strip_height réduit de 2×epb
+                         pour que la marge côté haut soit aussi respectée.
     """
     placed_map = {pi.id: pi for pi in placed_items}
     placements: List[PlacementType] = []
     nb_non = 0
+
+    # Limites intérieures de la zone valide (après marge de bord)
+    lim_x = largeur_plaque - espacement_bord
+    lim_y = hauteur_plaque - espacement_bord
 
     for m in metas:
         idx = m['idx_orig']
@@ -85,8 +95,9 @@ def placer_depuis_solution(placed_items, metas: list,
             nb_non += 1
             continue
 
-        tx    = float(pi.translation[0])
-        ty    = float(pi.translation[1])
+        # Décaler de espacement_bord pour respecter la marge côté gauche/bas
+        tx    = float(pi.translation[0]) + espacement_bord
+        ty    = float(pi.translation[1]) + espacement_bord
         angle = float(pi.rotation)
 
         if abs(angle) > 1e-9:
@@ -101,7 +112,7 @@ def placer_depuis_solution(placed_items, metas: list,
         if bx0 < -1e-3 or by0 < -1e-3:
             nb_non += 1
             continue
-        if bx1 > largeur_plaque + 1e-3 or by1 > hauteur_plaque + 1e-3:
+        if bx1 > lim_x + 1e-3 or by1 > lim_y + 1e-3:
             nb_non += 1
             continue
 
@@ -122,6 +133,7 @@ def calculer_nesting_sparrow(
     angles_deg: Optional[List[int]],
     time_limit_s: int,
     num_workers: int,
+    espacement_bord: float = 0.0,
 ) -> Tuple[List[PlacementType], bool]:
     """
     Nesting optimisé via sparrow — appel bloquant sans suivi de progression.
@@ -130,17 +142,19 @@ def calculer_nesting_sparrow(
     interactive avec affichage des solutions intermédiaires et bouton stop.
 
     sparrow résout le strip packing 2D irrégulier :
-      - hauteur de la bande fixée = hauteur_plaque
-      - longueur minimisée (les pièces hors largeur_plaque sont ignorées)
+      - hauteur de la bande fixée = hauteur_plaque − 2×espacement_bord
+        (les pièces sont ensuite décalées de +espacement_bord en Y)
+      - longueur minimisée (les pièces hors largeur_plaque−espacement_bord sont ignorées)
 
     Paramètres :
-        polygones      : liste de Polygon shapely à placer
-        largeur_plaque : dimension X max de la plaque (mm)
-        hauteur_plaque : dimension Y max / strip_height sparrow (mm)
-        espacement     : jeu minimum pièce-pièce (mm) — natif sparrow
-        angles_deg     : angles autorisés en degrés (None = rotation libre)
-        time_limit_s   : durée maximale d'optimisation en secondes
-        num_workers    : threads parallèles (0 ou None = auto-détection)
+        polygones       : liste de Polygon shapely à placer
+        largeur_plaque  : dimension X max de la plaque (mm)
+        hauteur_plaque  : dimension Y max / strip_height sparrow (mm)
+        espacement      : jeu minimum pièce-pièce (mm) — natif sparrow
+        angles_deg      : angles autorisés en degrés (None = rotation libre)
+        time_limit_s    : durée maximale d'optimisation en secondes
+        num_workers     : threads parallèles (0 ou None = auto-détection)
+        espacement_bord : marge minimale pièces/bord de plaque (mm)
     """
     try:
         import spyrrow
@@ -160,9 +174,13 @@ def calculer_nesting_sparrow(
         for m in metas
     ]
 
+    # Réduire la hauteur de la bande de 2×epb : spyrrow place les pièces dans
+    # [0, H−2·epb], puis placer_depuis_solution les décale de +epb en Y.
+    effective_height = max(1.0, hauteur_plaque - 2.0 * espacement_bord)
+
     instance = spyrrow.StripPackingInstance(
         "stl_slicer_nesting",
-        strip_height=hauteur_plaque,
+        strip_height=effective_height,
         items=items
     )
     config = spyrrow.StripPackingConfig(
@@ -175,4 +193,5 @@ def calculer_nesting_sparrow(
 
     solution = instance.solve(config)
     return placer_depuis_solution(solution.placed_items, metas,
-                                  largeur_plaque, hauteur_plaque)
+                                  largeur_plaque, hauteur_plaque,
+                                  espacement_bord=espacement_bord)

@@ -12,6 +12,120 @@ from shapely.geometry import Polygon
 from typing import List, Tuple
 
 
+def _reconstruire_avec_trous(anneaux_bruts: list) -> List[Polygon]:
+    """
+    Reconstruit des Polygon shapely avec trous depuis une liste d'anneaux bruts.
+    Trie par aire décroissante, puis assigne chaque anneau comme trou du premier
+    anneau plus grand dont il est strictement à l'intérieur (containment du centroid).
+    """
+    anneaux = sorted(
+        [p.buffer(0) for p in anneaux_bruts if p is not None and p.area > 1e-6],
+        key=lambda p: p.area,
+        reverse=True
+    )
+    if not anneaux:
+        return []
+
+    utilises: set = set()
+    resultat: List[Polygon] = []
+
+    for i, ext in enumerate(anneaux):
+        if i in utilises:
+            continue
+        trous = []
+        for j, cand in enumerate(anneaux):
+            if i == j or j in utilises:
+                continue
+            if ext.contains(cand.centroid):
+                trous.append(list(cand.exterior.coords))
+                utilises.add(j)
+        try:
+            poly = Polygon(ext.exterior.coords, trous) if trous else ext
+            poly = poly.buffer(0)
+            if poly.is_valid and poly.area > 1e-6:
+                resultat.append(poly)
+        except Exception:
+            if ext.is_valid and ext.area > 1e-6:
+                resultat.append(ext)
+        utilises.add(i)
+
+    return resultat
+
+
+def _extraire_polygones_section(section_2d) -> List[Polygon]:
+    """
+    Extrait les polygones valides d'une section 2D trimesh en gérant
+    correctement les trous intérieurs (pièces creuses, sections annulaires…).
+
+    Stratégie hybride :
+      1. polygons_full  — méthode native trimesh, robuste pour la majorité des
+         sections (simples ou complexes, tous axes). Source principale.
+      2. polygons_closed — récupère TOUS les anneaux fermés indépendamment du
+         sens de rotation. Utilisé pour DÉTECTER si des trous ont été manqués
+         par polygons_full (un anneau en contient un autre → trou non assigné).
+      3. Si des trous sont détectés via polygons_closed, on reconstruit les
+         polygones par containment géométrique (orientation-agnostique).
+         Cela corrige le bogue des coupes selon X/Y où polygons_full renvoie
+         parfois les anneaux intérieurs comme polygones séparés au lieu de trous.
+      4. Dernier recours : si polygons_full est vide, tenter une reconstruction
+         directe depuis polygons_closed.
+    """
+    # ── Source 1 : polygons_full (robuste, toutes géométries) ────────────────
+    polys_full: List[Polygon] = []
+    try:
+        # NOTE: ne pas utiliser `polygons_full or []` — si trimesh retourne un
+        # numpy.ndarray, l'opérateur `or` lève ValueError (ambiguous truth value).
+        # On accède à l'attribut puis on itère directement.
+        _pf = section_2d.polygons_full
+        if _pf is not None and len(_pf) > 0:
+            polys_full = [p for p in _pf
+                          if p is not None and p.is_valid and p.area > 1e-6]
+    except Exception:
+        pass
+
+    # ── Source 2 : anneaux bruts (polygons_closed) ───────────────────────────
+    anneaux_bruts: list = []
+    try:
+        # Même précaution : polygons_closed retourne un numpy.ndarray dans
+        # certaines versions de trimesh — ne jamais utiliser `or []` dessus.
+        _pc = section_2d.polygons_closed
+        if _pc is not None and len(_pc) > 0:
+            anneaux_bruts = [p for p in _pc
+                             if p is not None and p.area > 1e-6]
+    except Exception:
+        pass
+
+    # ── Détection de trous manqués ────────────────────────────────────────────
+    # Si au moins un anneau est strictement à l'intérieur d'un autre,
+    # polygons_full n'a pas correctement assigné les trous → on reconstruit.
+    a_des_trous = False
+    if len(anneaux_bruts) >= 2:
+        anneaux_tries = sorted(anneaux_bruts, key=lambda p: p.area, reverse=True)
+        for i, ext in enumerate(anneaux_tries):
+            for j, cand in enumerate(anneaux_tries):
+                if i != j and ext.contains(cand.centroid):
+                    a_des_trous = True
+                    break
+            if a_des_trous:
+                break
+
+    if a_des_trous:
+        # ── Reconstruction avec trous par containment (orientation-agnostique) ─
+        resultat = _reconstruire_avec_trous(anneaux_bruts)
+        if resultat:
+            return resultat
+
+    # ── Cas sans trou : polygons_full est suffisant ───────────────────────────
+    if polys_full:
+        return polys_full
+
+    # ── Dernier recours : reconstruction depuis polygons_closed ───────────────
+    if anneaux_bruts:
+        return _reconstruire_avec_trous(anneaux_bruts)
+
+    return []
+
+
 # Correspondance entre le nom d'axe et son indice (0=X, 1=Y, 2=Z)
 AXES = {'X': 0, 'Y': 1, 'Z': 2}
 
@@ -113,15 +227,13 @@ def calculer_sections(
             section_2d, _transform = section_3d.to_planar()
 
             # --- Extraction des polygones fermés ---
-            # polygons_full retourne les polygones shapely en tenant compte
-            # des trous éventuels (géométries concaves ou creuses).
-            polygones = section_2d.polygons_full
-
-            if polygones and len(polygones) > 0:
-                # Filtrer les polygones trop petits (artefacts numériques)
-                polygones_valides = [p for p in polygones if p.area > 1e-6]
-                if polygones_valides:
-                    sections_resultats.append((float(pos), polygones_valides))
+            # _extraire_polygones_section gère les trous intérieurs :
+            #   1. Reconstruit depuis polygons_closed par containment géométrique
+            #      (robuste pour les coupes selon X, Y et Z)
+            #   2. Si échec, tente polygons_full natif trimesh en dernier recours
+            polygones_valides = _extraire_polygones_section(section_2d)
+            if polygones_valides:
+                sections_resultats.append((float(pos), polygones_valides))
 
         except Exception:
             # Une coupe peut échouer sur des géométries non-manifold ou

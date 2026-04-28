@@ -3,51 +3,61 @@
 #
 # Format DXF R2010 (compatible AutoCAD, FreeCAD, LaserCAD, etc.)
 # Unités : millimètres
-# Chaque contour shapely est converti en LWPOLYLINE DXF fermée.
+#
+# Deux modes :
+#   - Sans lissage (precision_lissage=None) : LWPOLYLINE fermée par contour.
+#   - Avec lissage  (precision_lissage > 0) : entités natives LINE / ARC / CIRCLE
+#     pour optimiser la taille du fichier et restaurer la précision des cercles.
 # =============================================================================
 
 import os
+from typing import List, Tuple, Optional
+
 import ezdxf
 from ezdxf import units
 from shapely.geometry import Polygon
-from typing import List, Tuple
+
+from core.lissage import lisser_polygone, _angles_dxf
 
 
 # Type d'un placement issu de nesting.py
 PlacementType = Tuple[Polygon, float, float, int]
 
 
+# =============================================================================
+# Export des sections individuelles
+# =============================================================================
+
 def exporter_toutes_sections(
     sections: List[Tuple[float, List[Polygon]]],
     dossier_sortie: str,
-    prefixe: str = 'section'
+    prefixe: str = 'section',
+    precision_lissage: Optional[float] = None,
 ) -> List[str]:
     """
     Exporte chaque section dans un fichier DXF individuel.
 
     Nommage automatique : <prefixe>_001.dxf, <prefixe>_002.dxf, ...
-    Si prefixe est fourni (ex. nom du fichier STL sans extension),
-    les fichiers seront nommés pied_001.dxf, pied_002.dxf, etc.
 
     Paramètres:
-        sections (list)      : liste de (position_mm, [polygones])
-                               telle que retournée par slicer.calculer_sections()
-        dossier_sortie (str) : chemin du dossier où créer les fichiers
-        prefixe (str)        : préfixe des fichiers (défaut : 'section')
+        sections              : liste de (position_mm, [polygones])
+        dossier_sortie        : dossier de sortie (créé si absent)
+        prefixe               : préfixe du nom (défaut : 'section')
+        precision_lissage     : si non None, active la reconnaissance d'arcs
+                                et cercles avec cette tolérance (mm)
 
     Retourne:
         Liste des chemins absolus des fichiers créés.
     """
     os.makedirs(dossier_sortie, exist_ok=True)
     fichiers_crees = []
-
-    # Nettoyer le préfixe : supprimer les caractères invalides pour un nom de fichier
     prefixe_propre = _nettoyer_nom_fichier(prefixe) if prefixe else 'section'
 
     for i, (position, polygones) in enumerate(sections):
         nom_fichier = f"{prefixe_propre}_{i + 1:03d}.dxf"
         chemin = os.path.join(dossier_sortie, nom_fichier)
-        exporter_section_dxf(polygones, chemin, position_mm=position)
+        exporter_section_dxf(polygones, chemin, position_mm=position,
+                             precision_lissage=precision_lissage)
         fichiers_crees.append(chemin)
 
     return fichiers_crees
@@ -62,53 +72,60 @@ def _nettoyer_nom_fichier(nom: str) -> str:
 def exporter_section_dxf(
     polygones: List[Polygon],
     chemin_fichier: str,
-    position_mm: float = None
+    position_mm: float = None,
+    precision_lissage: Optional[float] = None,
 ):
     """
-    Exporte une liste de polygones (une seule section) dans un fichier DXF.
+    Exporte une section (liste de polygones) dans un fichier DXF.
 
     Paramètres:
-        polygones (list)      : polygones shapely de la section
-        chemin_fichier (str)  : chemin complet du fichier .dxf à créer
-        position_mm (float)   : position de la coupe (utilisée dans le commentaire)
+        polygones          : polygones shapely de la section
+        chemin_fichier     : chemin .dxf à créer
+        position_mm        : position de la coupe (informative)
+        precision_lissage  : si non None, applique le lissage en arcs/cercles
     """
     doc = ezdxf.new('R2010')
     doc.units = units.MM
 
-    # Métadonnées dans l'en-tête DXF
     if position_mm is not None:
-        doc.header['$ACADVER'] = 'AC1024'  # R2010
+        doc.header['$ACADVER'] = 'AC1024'
 
     msp = doc.modelspace()
 
-    # Ajouter chaque polygone (contour extérieur + trous)
     for polygone in polygones:
-        _ajouter_polygone_dxf(msp, polygone, layer='CONTOURS', color=7)
+        _ajouter_polygone_dxf(msp, polygone,
+                              layer='CONTOURS', color=7,
+                              precision_lissage=precision_lissage)
 
     doc.saveas(chemin_fichier)
 
+
+# =============================================================================
+# Export du nesting complet
+# =============================================================================
 
 def exporter_nesting_dxf(
     placements: List[PlacementType],
     largeur_plaque: float,
     hauteur_plaque: float,
     chemin_fichier: str,
-    inclure_cadre: bool = False
+    inclure_cadre: bool = False,
+    precision_lissage: Optional[float] = None,
 ):
     """
     Exporte le nesting complet dans un seul fichier DXF.
 
     Structure du fichier :
-      - Layer 'PLAQUE'      : rectangle de la plaque (optionnel, désactivé par défaut)
+      - Layer 'PLAQUE'      : rectangle de la plaque (optionnel)
       - Layer 'SECTION_XXX' : chaque contour sectionné (couleur bleue)
 
     Paramètres:
-        placements (list)    : résultat de nesting.calculer_nesting()
-        largeur_plaque (float)
-        hauteur_plaque (float)
-        chemin_fichier (str) : chemin du fichier .dxf de sortie
-        inclure_cadre (bool) : True = ajouter le rectangle de la plaque dans le DXF
-                               False (défaut) = contours seuls, sans cadre
+        placements         : résultat de nesting.calculer_nesting()
+        largeur_plaque     : dimension X de la plaque (mm)
+        hauteur_plaque     : dimension Y de la plaque (mm)
+        chemin_fichier     : chemin du fichier .dxf de sortie
+        inclure_cadre      : True = ajouter le rectangle de la plaque
+        precision_lissage  : si non None, applique le lissage en arcs/cercles
     """
     doc = ezdxf.new('R2010')
     doc.units = units.MM
@@ -125,32 +142,43 @@ def exporter_nesting_dxf(
 
     # --- Contours des sections (un layer par section) ---
     for poly_place, _ox, _oy, idx_original in placements:
-        # Nommage du layer : SECTION_001, SECTION_002, ...
         layer_name = f'SECTION_{idx_original + 1:03d}'
-        _ajouter_polygone_dxf(msp, poly_place, layer=layer_name, color=5)
+        _ajouter_polygone_dxf(msp, poly_place,
+                              layer=layer_name, color=5,
+                              precision_lissage=precision_lissage)
 
     doc.saveas(chemin_fichier)
 
 
-def _ajouter_polygone_dxf(msp, polygone: Polygon, layer: str = '0', color: int = 7):
-    """
-    Convertit un polygone shapely en entités DXF LWPOLYLINE.
+# =============================================================================
+# Conversion shapely → entités DXF
+# =============================================================================
 
-    Ajoute :
-      - Le contour extérieur (exterior ring)
-      - Les éventuels trous intérieurs (interior rings) — pour les formes creuses
-
-    Paramètres:
-        msp    : ModelSpace ezdxf
-        polygone (Polygon) : polygone shapely à convertir
-        layer (str)        : nom du layer DXF
-        color (int)        : index couleur ACI (1=rouge, 2=jaune, 5=bleu, 7=blanc)
+def _ajouter_polygone_dxf(msp, polygone: Polygon,
+                           layer: str = '0', color: int = 7,
+                           precision_lissage: Optional[float] = None):
     """
-    # --- Contour extérieur ---
+    Convertit un polygone shapely en entités DXF.
+
+    Sans lissage (precision_lissage=None) :
+        - Chaque anneau → une LWPOLYLINE fermée (comportement historique).
+
+    Avec lissage (precision_lissage > 0) :
+        - Chaque anneau est analysé par core/lissage.lisser_polygone
+        - Les entités retournées (line/arc/circle) sont ajoutées individuellement.
+        - Les segments rectilignes consécutifs sont groupés en LWPOLYLINE
+          pour conserver un fichier compact.
+    """
+    if precision_lissage is not None and precision_lissage > 0:
+        _ajouter_polygone_lisse(msp, polygone, layer, color, precision_lissage)
+    else:
+        _ajouter_polygone_brut(msp, polygone, layer, color)
+
+
+def _ajouter_polygone_brut(msp, polygone: Polygon, layer: str, color: int):
+    """Export classique : chaque anneau → LWPOLYLINE fermée."""
     coords_ext = list(polygone.exterior.coords)
     if len(coords_ext) >= 2:
-        # On passe les coordonnées sans le point de fermeture doublon
-        # (shapely ferme les rings en répétant le premier point)
         points = [(float(x), float(y)) for x, y in coords_ext[:-1]]
         msp.add_lwpolyline(
             points,
@@ -158,7 +186,6 @@ def _ajouter_polygone_dxf(msp, polygone: Polygon, layer: str = '0', color: int =
             dxfattribs={'layer': layer, 'color': color}
         )
 
-    # --- Trous intérieurs (géométries avec cavités) ---
     for interior in polygone.interiors:
         coords_int = list(interior.coords)
         if len(coords_int) >= 2:
@@ -168,3 +195,86 @@ def _ajouter_polygone_dxf(msp, polygone: Polygon, layer: str = '0', color: int =
                 close=True,
                 dxfattribs={'layer': layer, 'color': color}
             )
+
+
+def _ajouter_polygone_lisse(msp, polygone: Polygon, layer: str, color: int,
+                             precision: float):
+    """
+    Export optimisé : applique le lissage et émet des entités LINE/ARC/CIRCLE.
+
+    Trois cas selon le contenu de chaque anneau :
+      1. Un seul cercle           → 1 entité CIRCLE.
+      2. Que des segments droits  → 1 LWPOLYLINE fermée (close=True).
+      3. Mélange lignes + arcs    → entités individuelles, les lignes
+                                    consécutives étant regroupées en
+                                    LWPOLYLINE ouvertes pour compacité.
+    """
+    anneaux_entites = lisser_polygone(polygone, precision)
+    attrs = {'layer': layer, 'color': color}
+
+    for entites in anneaux_entites:
+        if not entites:
+            continue
+
+        # --- Cas 1 : cercle unique ---
+        if len(entites) == 1 and entites[0][0] == 'circle':
+            _typ, (cx, cy), r = entites[0]
+            msp.add_circle((cx, cy), r, dxfattribs=attrs)
+            continue
+
+        # --- Cas 2 : aucune courbe → polyligne fermée ---
+        if all(e[0] == 'line' for e in entites):
+            pts = [entites[0][1]]
+            for e in entites:
+                pts.append(e[2])
+            # Le dernier point reboucle sur le premier ; on le retire pour
+            # laisser close=True gérer la fermeture proprement.
+            if pts and pts[0] == pts[-1]:
+                pts = pts[:-1]
+            if len(pts) >= 2:
+                msp.add_lwpolyline(pts, close=True, dxfattribs=attrs)
+            continue
+
+        # --- Cas 3 : mélange → émission mixte ---
+        buffer_points: List[Tuple[float, float]] = []
+
+        def _flush_polyline():
+            """Vide le buffer de lignes accumulées en LWPOLYLINE ouverte."""
+            if len(buffer_points) >= 2:
+                msp.add_lwpolyline(list(buffer_points),
+                                   close=False, dxfattribs=attrs)
+            buffer_points.clear()
+
+        for ent in entites:
+            typ = ent[0]
+
+            if typ == 'line':
+                _, p0, p1 = ent
+                if not buffer_points:
+                    buffer_points.append(p0)
+                buffer_points.append(p1)
+
+            elif typ == 'arc':
+                _flush_polyline()
+                _, (cx, cy), r, p_start, p_end, p_mid = ent
+                # p_mid : point source réel ~milieu de l'arc → permet de
+                # déterminer le sens (CCW/CW) pour un ARC DXF correctement orienté.
+                start_deg, end_deg = _angles_dxf(p_start, p_end, p_mid, cx, cy)
+                msp.add_arc(
+                    center=(cx, cy),
+                    radius=r,
+                    start_angle=start_deg,
+                    end_angle=end_deg,
+                    dxfattribs=attrs,
+                )
+
+            elif typ == 'circle':
+                # Cercle au sein d'une décomposition (cas rare) : flush d'abord
+                _flush_polyline()
+                _, (cx, cy), r = ent
+                msp.add_circle((cx, cy), r, dxfattribs=attrs)
+
+        # Fin de l'anneau : émettre le dernier tronçon ouvert s'il existe.
+        _flush_polyline()
+
+

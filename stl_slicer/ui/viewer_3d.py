@@ -36,6 +36,8 @@ class Viewer3D(QWidget):
         # --- État interne ---
         self._mesh_pv = None       # Maillage PyVista courant
         self._mode = 'solid'       # 'solid' ou 'wireframe'
+        self._opacity = 0.82       # Opacité du modèle solide (0.1 – 0.9)
+        self._acteur_mesh = None   # Acteur VTK du mesh (pour mise à jour directe)
 
         # --- Configuration initiale du rendu ---
         self._plotter.set_background('#1a1a2e')
@@ -71,6 +73,27 @@ class Viewer3D(QWidget):
         """Passe en mode filaire (arêtes uniquement)."""
         self._mode = 'wireframe'
         self._rafraichir_affichage()
+
+    def set_opacity(self, percent: int):
+        """
+        Définit la transparence du modèle solide sans reconstruire la scène.
+
+        Paramètres:
+            percent (int) : transparence en % (10 à 90).
+                            Convertie en opacité : opacity = 1 - percent/100.
+        """
+        self._opacity = 1.0 - max(0, min(20, percent)) / 100.0
+        # Mise à jour directe de l'acteur VTK si disponible (évite reset_camera)
+        if self._acteur_mesh is not None and self._mode == 'solid':
+            try:
+                self._acteur_mesh.prop.opacity = self._opacity
+                self._plotter.render()
+                return
+            except Exception:
+                pass
+        # Fallback : reconstruction complète si l'acteur n'est pas disponible
+        if self._mode == 'solid':
+            self._rafraichir_affichage()
 
     def afficher_plans_coupe(self, positions: list, normale: list):
         """
@@ -143,8 +166,9 @@ class Viewer3D(QWidget):
         )
 
         # --- Mesh selon le mode ---
+        self._acteur_mesh = None
         if self._mode == 'wireframe':
-            self._plotter.add_mesh(
+            self._acteur_mesh = self._plotter.add_mesh(
                 self._mesh_pv,
                 style='wireframe',
                 color='#4FC3F7',
@@ -153,8 +177,7 @@ class Viewer3D(QWidget):
             )
         else:
             # Rendu solide : shading de Phong avec specular/diffuse/ambient
-            # opacity < 1 pour laisser apparaître le trièdre à travers la pièce
-            self._plotter.add_mesh(
+            self._acteur_mesh = self._plotter.add_mesh(
                 self._mesh_pv,
                 color='#9EC4D8',        # Bleu acier clair
                 smooth_shading=True,
@@ -162,7 +185,7 @@ class Viewer3D(QWidget):
                 specular_power=60,      # Concentration du reflet (plus = plus net)
                 diffuse=0.85,           # Composante diffuse (éclairage lambertien)
                 ambient=0.15,           # Lumière ambiante (évite les zones trop noires)
-                opacity=0.82,           # Semi-transparent : trièdre visible à travers
+                opacity=self._opacity,  # Transparence réglable via le curseur
                 show_edges=False
             )
 

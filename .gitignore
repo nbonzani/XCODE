@@ -45,3 +45,16 @@ desktop.ini
 # Fichiers locaux Claude Code
 .claude/
 .claudesettings.json.txt
+
+# === Règles importées depuis GitHub origin/main (phase 4-ter) ===
+.eggs/
+*.spec
+output/
+*.iso
+*.log
+**/data/m3u_cache.json
+**/data/m3u_cache.m3u
+**/data/ratings_cache.json
+**/.claude/
+*.sublime-workspace
+.DS_Store

@@ -17,12 +17,14 @@
 
 import os
 import time
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QDoubleSpinBox,
     QFileDialog, QGroupBox, QSplitter, QMessageBox,
-    QProgressBar, QTabWidget, QScrollArea, QFrame
+    QProgressBar, QTabWidget, QScrollArea, QFrame, QSlider,
+    QCheckBox
 )
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QSettings
 from PyQt6.QtGui import QAction, QPalette, QColor
@@ -89,20 +91,23 @@ class ThreadNesting(QThread):
     erreur    = pyqtSignal(str)
     progression = pyqtSignal(int, int)   # (etape_courante, total)
 
-    def __init__(self, polygones, largeur, hauteur, espacement, methode='multi'):
+    def __init__(self, polygones, largeur, hauteur, espacement, methode='multi',
+                 espacement_bord=None):
         super().__init__()
-        self._polygones  = polygones
-        self._largeur    = largeur
-        self._hauteur    = hauteur
-        self._espacement = espacement
-        self._methode    = methode
+        self._polygones       = polygones
+        self._largeur         = largeur
+        self._hauteur         = hauteur
+        self._espacement      = espacement
+        self._espacement_bord = espacement_bord
+        self._methode         = methode
 
     def run(self):
         try:
             placements, tous_places = calculer_nesting_optimise(
                 self._polygones, self._largeur, self._hauteur, self._espacement,
                 callback_progression=lambda i, n: self.progression.emit(i, n),
-                methode=self._methode
+                methode=self._methode,
+                espacement_bord=self._espacement_bord,
             )
             self.termine.emit(placements, tous_places)
         except Exception as e:
@@ -128,12 +133,13 @@ class ThreadNestingSparrow(QThread):
     intermediaire = pyqtSignal(list, bool, float)    # placements, tous_places, densité
 
     def __init__(self, polygones, largeur, hauteur, espacement,
-                 angles, time_limit_s, num_workers):
+                 angles, time_limit_s, num_workers, espacement_bord=None):
         super().__init__()
-        self._polygones   = polygones
-        self._largeur     = largeur
-        self._hauteur     = hauteur
-        self._espacement  = espacement
+        self._polygones       = polygones
+        self._largeur         = largeur
+        self._hauteur         = hauteur
+        self._espacement      = espacement
+        self._espacement_bord = espacement_bord
         self._angles      = angles
         self._time_limit  = time_limit_s
         self._num_workers = num_workers
@@ -157,6 +163,8 @@ class ThreadNestingSparrow(QThread):
         try:
             from core.nesting_sparrow import preparer_metas, placer_depuis_solution
 
+            epb = self._espacement_bord if self._espacement_bord is not None else 0.0
+
             metas = preparer_metas(self._polygones)
             items = [
                 spyrrow.Item(f"p{m['idx_orig']}", m['coords'],
@@ -164,9 +172,13 @@ class ThreadNestingSparrow(QThread):
                 for m in metas
             ]
 
+            # Réduire la hauteur de la bande de 2×epb : spyrrow pack les pièces dans
+            # [0, H−2·epb], puis placer_depuis_solution les décale de +epb en Y.
+            effective_height = max(1.0, self._hauteur - 2.0 * epb)
+
             instance = spyrrow.StripPackingInstance(
                 "stl_slicer_nesting",
-                strip_height=self._hauteur,
+                strip_height=effective_height,
                 items=items
             )
             config = spyrrow.StripPackingConfig(
@@ -194,7 +206,8 @@ class ThreadNestingSparrow(QThread):
                 for _report_type, solution in queue.drain():
                     placements, tous_places = placer_depuis_solution(
                         solution.placed_items, metas,
-                        self._largeur, self._hauteur
+                        self._largeur, self._hauteur,
+                        espacement_bord=epb
                     )
                     self.intermediaire.emit(
                         placements, tous_places, float(solution.density)
@@ -216,7 +229,8 @@ class ThreadNestingSparrow(QThread):
             if result_holder[0] is not None:
                 placements, tous_places = placer_depuis_solution(
                     result_holder[0].placed_items, metas,
-                    self._largeur, self._hauteur
+                    self._largeur, self._hauteur,
+                    espacement_bord=epb
                 )
                 self.termine.emit(placements, tous_places)
 
@@ -419,7 +433,10 @@ class MainWindow(QMainWindow):
         s.setValue('param/offset',     self._spin_offset.value())
         s.setValue('param/larg_plaque', self._spin_larg.value())
         s.setValue('param/haut_plaque', self._spin_haut.value())
-        s.setValue('param/espacement',  self._spin_esp.value())
+        s.setValue('param/espacement',      self._spin_esp.value())
+        s.setValue('param/espacement_bord', self._spin_esp_bord.value())
+        s.setValue('param/lissage_actif',   self._chk_lissage.isChecked())
+        s.setValue('param/lissage_precision', self._spin_precision.value())
 
     def _charger_parametres(self):
         """
@@ -433,7 +450,8 @@ class MainWindow(QMainWindow):
         # Bloquer les signaux pour éviter les appels à _sauvegarder_parametres
         widgets = [
             self._combo_axe, self._spin_epaisseur, self._spin_offset,
-            self._spin_larg, self._spin_haut, self._spin_esp
+            self._spin_larg, self._spin_haut, self._spin_esp, self._spin_esp_bord,
+            self._chk_lissage, self._spin_precision,
         ]
         for w in widgets:
             w.blockSignals(True)
@@ -462,6 +480,22 @@ class MainWindow(QMainWindow):
             esp = s.value('param/espacement', None)
             if esp is not None:
                 self._spin_esp.setValue(float(esp))
+
+            esp_bord = s.value('param/espacement_bord', None)
+            if esp_bord is not None:
+                self._spin_esp_bord.setValue(float(esp_bord))
+
+            lissage_actif = s.value('param/lissage_actif', None)
+            if lissage_actif is not None:
+                # QSettings peut renvoyer str 'true'/'false' au lieu de bool
+                if isinstance(lissage_actif, str):
+                    lissage_actif = lissage_actif.lower() == 'true'
+                self._chk_lissage.setChecked(bool(lissage_actif))
+                self._spin_precision.setEnabled(bool(lissage_actif))
+
+            prec = s.value('param/lissage_precision', None)
+            if prec is not None:
+                self._spin_precision.setValue(float(prec))
         finally:
             for w in widgets:
                 w.blockSignals(False)
@@ -493,7 +527,7 @@ class MainWindow(QMainWindow):
         # Panel de contrôle scrollable (créé après les vues)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setMinimumWidth(280)
+        scroll.setMinimumWidth(320)
         scroll.setMaximumWidth(600)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(self._creer_panel_controle())
@@ -501,7 +535,7 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(self._tabs)
 
-        splitter.setSizes([300, 800])
+        splitter.setSizes([360, 800])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 
@@ -555,6 +589,31 @@ class MainWindow(QMainWindow):
         groupe = QGroupBox("Affichage 3D")
         layout = QHBoxLayout(groupe)
 
+        # --- Curseur de transparence (à gauche du bouton Solide) ---
+        lbl_transp = QLabel("Transp. :")
+        lbl_transp.setToolTip("Transparence du modèle 3D (mode solide)")
+        lbl_transp.setStyleSheet("font-size: 11px;")
+        layout.addWidget(lbl_transp)
+
+        self._slider_transp = QSlider(Qt.Orientation.Horizontal)
+        self._slider_transp.setMinimum(0)      # 0 % = opaque
+        self._slider_transp.setMaximum(20)    # 20 % = légèrement transparent
+        self._slider_transp.setValue(18)      # valeur initiale ≈ opacité 0.82
+        self._slider_transp.setTickInterval(10)
+        self._slider_transp.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._slider_transp.setMaximumWidth(110)
+        self._slider_transp.setToolTip("Transparence du modèle (0 % = opaque, 20 % = légèrement transparent)")
+        self._slider_transp.valueChanged.connect(self._viewer3d.set_opacity)
+        layout.addWidget(self._slider_transp)
+
+        self._lbl_transp_val = QLabel("18 %")
+        self._lbl_transp_val.setStyleSheet("font-size: 10px; min-width: 30px;")
+        self._slider_transp.valueChanged.connect(
+            lambda v: self._lbl_transp_val.setText(f"{v} %")
+        )
+        layout.addWidget(self._lbl_transp_val)
+
+        # --- Boutons de mode ---
         btn_solid = QPushButton("Solide")
         btn_solid.setToolTip("Rendu solide avec éclairage")
         btn_solid.clicked.connect(self._viewer3d.set_mode_solid)
@@ -696,18 +755,33 @@ class MainWindow(QMainWindow):
         r2.addWidget(self._spin_haut)
         layout.addLayout(r2)
 
-        # Espacement
+        # Espacement entre pièces
         r3 = QHBoxLayout()
-        r3.addWidget(QLabel("Espacement :"))
+        r3.addWidget(QLabel("Esp. pièces :"))
         self._spin_esp = QDoubleSpinBox()
         self._spin_esp.setRange(0, 100)
         self._spin_esp.setValue(5.0)
         self._spin_esp.setSuffix(" mm")
         self._spin_esp.setDecimals(1)
+        self._spin_esp.setToolTip("Distance minimale entre pièces (mm)")
         self._spin_esp.valueChanged.connect(self._sauvegarder_parametres)
         self._spin_esp.valueChanged.connect(self._nesting_view.definir_espacement)
         r3.addWidget(self._spin_esp)
         layout.addLayout(r3)
+
+        # Espacement pièces / bord
+        r4 = QHBoxLayout()
+        r4.addWidget(QLabel("Esp. bord :"))
+        self._spin_esp_bord = QDoubleSpinBox()
+        self._spin_esp_bord.setRange(0, 100)
+        self._spin_esp_bord.setValue(10.0)
+        self._spin_esp_bord.setSuffix(" mm")
+        self._spin_esp_bord.setDecimals(1)
+        self._spin_esp_bord.setToolTip("Distance minimale entre les pièces et les bords de plaque (mm)")
+        self._spin_esp_bord.valueChanged.connect(self._sauvegarder_parametres)
+        self._spin_esp_bord.valueChanged.connect(self._nesting_view.definir_espacement_bord)
+        r4.addWidget(self._spin_esp_bord)
+        layout.addLayout(r4)
 
         self._btn_nesting = QPushButton("Calculer le nesting")
         self._btn_nesting.setEnabled(False)
@@ -741,6 +815,52 @@ class MainWindow(QMainWindow):
         groupe = QGroupBox("Export DXF")
         layout = QVBoxLayout(groupe)
 
+        # --- Option de lissage + bouton d'aperçu ---
+        row_lissage = QHBoxLayout()
+        self._chk_lissage = QCheckBox("Lissage (détection arcs/cercles)")
+        self._chk_lissage.setToolTip(
+            "Remplace les suites de segments rectilignes par des arcs de cercle\n"
+            "et les contours circulaires par des cercles natifs DXF.\n"
+            "Réduit la taille du fichier DXF et restaure la précision des courbes."
+        )
+        self._chk_lissage.setChecked(True)
+        self._chk_lissage.stateChanged.connect(self._sauvegarder_parametres)
+        row_lissage.addWidget(self._chk_lissage, stretch=1)
+
+        self._btn_apercu_lissage = QPushButton("Aperçu")
+        self._btn_apercu_lissage.setToolTip(
+            "Calcule le lissage sur le nesting courant avec la précision choisie\n"
+            "et l'affiche dans la vue 2D (arcs et cercles natifs rendus à\n"
+            "l'identique du futur DXF)."
+        )
+        self._btn_apercu_lissage.setEnabled(False)
+        self._btn_apercu_lissage.clicked.connect(self._apercu_lissage)
+        row_lissage.addWidget(self._btn_apercu_lissage)
+        layout.addLayout(row_lissage)
+
+        row_prec = QHBoxLayout()
+        lbl_prec = QLabel("Précision :")
+        lbl_prec.setToolTip(
+            "Écart maximal toléré entre les points d'origine et les arcs/cercles\n"
+            "générés. Valeur plus petite → fidélité accrue, valeur plus grande →\n"
+            "meilleure compression et davantage d'arcs détectés."
+        )
+        row_prec.addWidget(lbl_prec)
+        self._spin_precision = QDoubleSpinBox()
+        self._spin_precision.setRange(0.01, 5.0)
+        self._spin_precision.setValue(0.1)
+        self._spin_precision.setSingleStep(0.05)
+        self._spin_precision.setDecimals(2)
+        self._spin_precision.setSuffix(" mm")
+        self._spin_precision.setToolTip(lbl_prec.toolTip())
+        self._spin_precision.valueChanged.connect(self._sauvegarder_parametres)
+        row_prec.addWidget(self._spin_precision)
+        layout.addLayout(row_prec)
+
+        # Activer/désactiver le spinbox et le bouton Aperçu selon la case
+        self._chk_lissage.toggled.connect(self._spin_precision.setEnabled)
+        self._chk_lissage.toggled.connect(self._mettre_a_jour_etat_apercu_lissage)
+
         self._btn_exp_sections = QPushButton("Exporter sections individuelles...")
         self._btn_exp_sections.setEnabled(False)
         self._btn_exp_sections.setToolTip(
@@ -758,6 +878,76 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._btn_exp_nesting)
 
         return groupe
+
+    def _precision_lissage(self) -> Optional[float]:
+        """Retourne la précision si le lissage est activé, sinon None."""
+        if self._chk_lissage.isChecked():
+            return self._spin_precision.value()
+        return None
+
+    def _mettre_a_jour_etat_apercu_lissage(self, *_):
+        """
+        Active le bouton « Aperçu » uniquement si le lissage est coché ET
+        qu'un nesting a été calculé. Appelé depuis la case lissage et
+        depuis la fin de chaque nesting.
+        """
+        actif = (self._chk_lissage.isChecked()
+                 and bool(self._placements))
+        self._btn_apercu_lissage.setEnabled(actif)
+
+    def _apercu_lissage(self):
+        """
+        Calcule les entités lissées pour chaque placement courant avec la
+        précision choisie, puis les affiche dans la vue 2D (en remplacement
+        des polygones rectilignes). Affiche un récapitulatif dans le label
+        d'information et la barre de statut.
+        """
+        if not self._placements:
+            QMessageBox.information(
+                self, "Aperçu lissage",
+                "Aucun nesting à prévisualiser.\n"
+                "Calculez d'abord le nesting."
+            )
+            return
+
+        from core.lissage import lisser_polygone, stats_entites
+
+        precision = self._spin_precision.value()
+
+        entites_par_placement = []
+        total_avant  = 0
+        total_apres  = {'lignes': 0, 'arcs': 0, 'cercles': 0}
+
+        for poly, _ox, _oy, _idx in self._placements:
+            # Compter les segments d'origine (anneau extérieur + trous)
+            total_avant += max(0, len(poly.exterior.coords) - 1)
+            for interior in poly.interiors:
+                total_avant += max(0, len(interior.coords) - 1)
+
+            anneaux = lisser_polygone(poly, precision)
+            entites_par_placement.append(anneaux)
+
+            for ring in anneaux:
+                s = stats_entites(ring)
+                for k in total_apres:
+                    total_apres[k] += s[k]
+
+        self._nesting_view.definir_entites_lisses(entites_par_placement)
+        self._tabs.setCurrentIndex(1)   # bascule sur l'onglet nesting
+
+        total_final = sum(total_apres.values())
+        if total_avant > 0:
+            reduction = (1.0 - total_final / total_avant) * 100.0
+        else:
+            reduction = 0.0
+
+        msg = (f"Aperçu lissage (précision {precision:.2f} mm) — "
+               f"{total_avant} segments → "
+               f"{total_apres['lignes']} lignes, "
+               f"{total_apres['arcs']} arcs, "
+               f"{total_apres['cercles']} cercles  "
+               f"({reduction:.0f}% en moins)")
+        self.statusBar().showMessage(msg)
 
     # =========================================================================
     # Actions : Fichier
@@ -823,6 +1013,7 @@ class MainWindow(QMainWindow):
             self._btn_exp_nesting.setEnabled(False)
             self._action_export_sections.setEnabled(False)
             self._action_export_nesting.setEnabled(False)
+            self._mettre_a_jour_etat_apercu_lissage()
 
             # Mettre à jour l'aperçu du nombre de tranches
             self._mettre_a_jour_apercu_tranches()
@@ -989,13 +1180,15 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Nesting", "Aucun contour à placer.")
             return
 
-        largeur   = self._spin_larg.value()
-        hauteur   = self._spin_haut.value()
-        espacement = self._spin_esp.value()
+        largeur         = self._spin_larg.value()
+        hauteur         = self._spin_haut.value()
+        espacement      = self._spin_esp.value()
+        espacement_bord = self._spin_esp_bord.value()
 
         try:
             placements, tous_places = calculer_nesting(
-                tous_polygones, largeur, hauteur, espacement
+                tous_polygones, largeur, hauteur, espacement,
+                espacement_bord=espacement_bord,
             )
             self._nesting_termine(placements, tous_places,
                                   len(tous_polygones), largeur, hauteur,
@@ -1011,9 +1204,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Nesting", "Aucun contour à placer.")
             return
 
-        largeur    = self._spin_larg.value()
-        hauteur    = self._spin_haut.value()
-        espacement = self._spin_esp.value()
+        largeur         = self._spin_larg.value()
+        hauteur         = self._spin_haut.value()
+        espacement      = self._spin_esp.value()
+        espacement_bord = self._spin_esp_bord.value()
 
         _labels = {
             'aire':      "Aire décroissante",
@@ -1041,7 +1235,8 @@ class MainWindow(QMainWindow):
         self._methode_nesting  = methode
 
         self._thread_nesting = ThreadNesting(
-            tous_polygones, largeur, hauteur, espacement, methode=methode
+            tous_polygones, largeur, hauteur, espacement, methode=methode,
+            espacement_bord=espacement_bord,
         )
         self._thread_nesting.termine.connect(self._nesting_optimise_termine)
         self._thread_nesting.erreur.connect(self._nesting_optimise_erreur)
@@ -1089,9 +1284,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Nesting", "Aucun contour à placer.")
             return
 
-        largeur    = self._spin_larg.value()
-        hauteur    = self._spin_haut.value()
-        espacement = self._spin_esp.value()
+        largeur         = self._spin_larg.value()
+        hauteur         = self._spin_haut.value()
+        espacement      = self._spin_esp.value()
+        espacement_bord = self._spin_esp_bord.value()
 
         if methode == 'sparrow_moy':
             angles       = ANGLES_MOYENNE
@@ -1112,6 +1308,7 @@ class MainWindow(QMainWindow):
         self._nesting_sparrow_debut          = time.time()
         self._meilleure_solution_sparrow     = []
         self._meilleure_score_sparrow        = float('inf')
+        self._bbox_sparrow_courante          = ""
 
         # Verrouiller l'UI
         self._btn_nesting.setEnabled(False)
@@ -1127,7 +1324,8 @@ class MainWindow(QMainWindow):
 
         self._thread_nesting_sparrow = ThreadNestingSparrow(
             tous_polygones, largeur, hauteur, espacement,
-            angles, time_limit_s, num_workers
+            angles, time_limit_s, num_workers,
+            espacement_bord=espacement_bord,
         )
         self._thread_nesting_sparrow.intermediaire.connect(
             self._nesting_sparrow_intermediaire)
@@ -1143,9 +1341,11 @@ class MainWindow(QMainWindow):
         l_min = self._nesting_sparrow_limite // 60
         l_sec = self._nesting_sparrow_limite % 60
         pct = self._barre_nesting.value()
+        # _bbox_sparrow_courante est mis à jour par _nesting_sparrow_intermediaire
+        bbox_str = getattr(self, '_bbox_sparrow_courante', "")
         self._barre_nesting.setFormat(
             f"{e_min:02d}:{e_sec:02d} / {l_min:02d}:{l_sec:02d}"
-            f"  —  densité {pct}%"
+            f"  —  remplissage {pct}%{bbox_str}"
         )
 
     def _nesting_sparrow_intermediaire(self, placements: list,
@@ -1155,28 +1355,53 @@ class MainWindow(QMainWindow):
         self._placements = placements
         self._nb_non_places = self._nb_total_nesting - len(placements)
 
-        # Tracker la meilleure solution par aire de boîte englobante
+        epp = self._spin_esp.value()
+        epb = self._spin_esp_bord.value()
+
+        # Tracker la meilleure solution par aire de boîte englobante (brute, sans Epb)
         if placements:
-            bw, bh = calculer_bbox_placements(placements)
-            score = bw * bh
+            bw_brut, bh_brut = calculer_bbox_placements(placements)
+            score = bw_brut * bh_brut
             if score < self._meilleure_score_sparrow:
                 self._meilleure_score_sparrow    = score
                 self._meilleure_solution_sparrow = list(placements)
 
+            # Calcul remplissage et bbox tôle avec notre formule
+            pct = min(100, int(calculer_surface_utilisee(
+                placements, self._larg_nesting, self._haut_nesting,
+                espacement_pieces=epp, espacement_bord=epb,
+            )))
+            tw, th = calculer_bbox_placements(placements, espacement_bord=epb)
+            self._bbox_sparrow_courante = f"  |  tôle {tw:.0f}×{th:.0f} mm"
+        else:
+            pct = 0
+            self._bbox_sparrow_courante = ""
+
         # Mettre à jour la vue (animation — on montre la solution courante)
         self._nesting_view.definir_plaque(self._larg_nesting, self._haut_nesting)
-        self._nesting_view.definir_espacement(self._spin_esp.value())
+        self._nesting_view.definir_espacement(epp)
+        self._nesting_view.definir_espacement_bord(epb)
         self._nesting_view.definir_placements(placements, self._nb_non_places)
         self._tabs.setCurrentIndex(1)
 
-        # Barre de progression = densité en %
-        pct = min(100, int(densite * 100))
+        # Barre de progression = remplissage selon notre formule
         self._barre_nesting.setValue(pct)
+
+        # Label d'info mis à jour en temps réel
+        if placements:
+            tw, th = calculer_bbox_placements(placements, espacement_bord=epb)
+            nb = len(placements)
+            self._lbl_nesting_info.setText(
+                f"Solution en cours — {nb}/{self._nb_total_nesting} pièce(s)\n"
+                f"Taille tôle min. : {tw:.1f} × {th:.1f} mm\n"
+                f"Remplissage : {pct:.0f}%"
+            )
 
         # Activer l'export avec le résultat intermédiaire courant
         if placements:
             self._btn_exp_nesting.setEnabled(True)
             self._action_export_nesting.setEnabled(True)
+        self._mettre_a_jour_etat_apercu_lissage()
 
     def _nesting_sparrow_termine(self, placements: list, tous_places: bool):
         """Callback de fin naturelle du thread sparrow."""
@@ -1221,20 +1446,24 @@ class MainWindow(QMainWindow):
             # Mettre à jour la vue avec la meilleure solution
             self._nesting_view.definir_placements(meilleure, self._nb_non_places)
 
+            epp_s = self._spin_esp.value()
+            epb_s = self._spin_esp_bord.value()
             taux = calculer_surface_utilisee(
-                meilleure, self._larg_nesting, self._haut_nesting)
-            bw, bh = calculer_bbox_placements(meilleure)
+                meilleure, self._larg_nesting, self._haut_nesting,
+                espacement_pieces=epp_s, espacement_bord=epb_s,
+            )
+            tw, th = calculer_bbox_placements(meilleure, espacement_bord=epb_s)
             nb     = len(meilleure)
             _labels = {'sparrow_moy': "Sparrow Moyenne", 'sparrow_max': "Sparrow Maxi"}
             label   = _labels.get(self._methode_nesting, "Sparrow")
             self._lbl_nesting_info.setText(
                 f"[{label}]  Arrêté — {nb}/{self._nb_total_nesting} pièce(s)\n"
-                f"Meilleure boîte englobante : {bw:.1f} × {bh:.1f} mm\n"
-                f"Taux d'utilisation : {taux:.1f}%"
+                f"Taille tôle min. : {tw:.1f} × {th:.1f} mm\n"
+                f"Taux de remplissage : {taux:.1f}%"
             )
             self.statusBar().showMessage(
                 f"Sparrow arrêté — meilleure solution : {nb} pièces, "
-                f"bbox {bw:.0f}×{bh:.0f} mm, taux {taux:.1f}%"
+                f"tôle {tw:.0f}×{th:.0f} mm, remplissage {taux:.1f}%"
             )
 
     def _nesting_termine(self, placements: list, tous_places: bool,
@@ -1245,11 +1474,17 @@ class MainWindow(QMainWindow):
         nb_places = len(placements)
         self._nb_non_places = nb_total - nb_places
 
-        taux = calculer_surface_utilisee(placements, largeur, hauteur)
+        epp = self._spin_esp.value()
+        epb = self._spin_esp_bord.value()
+        taux = calculer_surface_utilisee(
+            placements, largeur, hauteur,
+            espacement_pieces=epp, espacement_bord=epb,
+        )
 
         # Mettre à jour la vue nesting
         self._nesting_view.definir_plaque(largeur, hauteur)
-        self._nesting_view.definir_espacement(self._spin_esp.value())
+        self._nesting_view.definir_espacement(epp)
+        self._nesting_view.definir_espacement_bord(epb)
         self._nesting_view.definir_placements(placements, self._nb_non_places)
         self._tabs.setCurrentIndex(1)   # basculer sur l'onglet nesting
 
@@ -1265,22 +1500,22 @@ class MainWindow(QMainWindow):
         }
         mode_txt = _mode_labels.get(mode, mode)
         if mode != 'simple' and placements:
-            bw, bh = calculer_bbox_placements(placements)
-            bbox_txt = f"\nBoîte englobante : {bw:.1f} × {bh:.1f} mm"
+            tw, th = calculer_bbox_placements(placements, espacement_bord=epb)
+            bbox_txt = f"\nTaille tôle min. : {tw:.1f} × {th:.1f} mm"
         else:
             bbox_txt = ""
 
         if tous_places:
             info = (f"[{mode_txt}]  {nb_places}/{nb_total} pièce(s) placée(s)\n"
-                    f"Taux d'utilisation plaque : {taux:.1f}%{bbox_txt}")
+                    f"Taux de remplissage : {taux:.1f}%{bbox_txt}")
             self.statusBar().showMessage(
                 f"Nesting {mode_txt.lower()} terminé : "
-                f"{nb_places} pièces, taux {taux:.1f}%"
+                f"{nb_places} pièces, remplissage {taux:.1f}%"
             )
         else:
             info = (f"[{mode_txt}]  {nb_places}/{nb_total} pièce(s) placée(s)\n"
                     f"{self._nb_non_places} non placée(s) — augmentez la plaque.\n"
-                    f"Taux d'utilisation : {taux:.1f}%{bbox_txt}")
+                    f"Taux de remplissage : {taux:.1f}%{bbox_txt}")
             self.statusBar().showMessage(
                 f"Nesting {mode_txt.lower()} partiel : "
                 f"{nb_places}/{nb_total} pièces placées."
@@ -1291,6 +1526,7 @@ class MainWindow(QMainWindow):
         if placements:
             self._btn_exp_nesting.setEnabled(True)
             self._action_export_nesting.setEnabled(True)
+        self._mettre_a_jour_etat_apercu_lissage()
 
     # =========================================================================
     # Actions : Export DXF
@@ -1317,8 +1553,10 @@ class MainWindow(QMainWindow):
                    if self._fichier_stl else 'section')
 
         try:
-            fichiers = exporter_toutes_sections(self._sections, dossier,
-                                                prefixe=prefixe)
+            fichiers = exporter_toutes_sections(
+                self._sections, dossier, prefixe=prefixe,
+                precision_lissage=self._precision_lissage(),
+            )
             QMessageBox.information(
                 self, "Export réussi",
                 f"{len(fichiers)} fichier(s) DXF créé(s) dans :\n{dossier}\n\n"
@@ -1349,7 +1587,8 @@ class MainWindow(QMainWindow):
                 self._placements,
                 self._spin_larg.value(),
                 self._spin_haut.value(),
-                chemin
+                chemin,
+                precision_lissage=self._precision_lissage(),
             )
             QMessageBox.information(
                 self, "Export réussi",

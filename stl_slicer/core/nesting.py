@@ -37,7 +37,8 @@ def calculer_nesting(
     polygones: List[Polygon],
     largeur_plaque: float,
     hauteur_plaque: float,
-    espacement: float
+    espacement: float,
+    espacement_bord: Optional[float] = None,
 ) -> Tuple[List[PlacementType], bool]:
     """
     Répartit les polygones 2D sur la plaque par placement en rangées.
@@ -49,14 +50,19 @@ def calculer_nesting(
       4. Si la pièce dépasse le bord haut, elle n'est pas placée (signalé).
 
     Paramètres:
-        polygones (list)       : liste de Polygon shapely à placer
-        largeur_plaque (float) : largeur de la plaque en mm
-        hauteur_plaque (float) : hauteur de la plaque en mm
-        espacement (float)     : distance minimale entre pièces et bords (mm)
+        polygones (list)            : liste de Polygon shapely à placer
+        largeur_plaque (float)      : largeur de la plaque en mm
+        hauteur_plaque (float)      : hauteur de la plaque en mm
+        espacement (float)          : distance minimale entre pièces (mm)
+        espacement_bord (float|None): distance minimale pièces/bord (mm).
+                                      Si None, utilise la valeur de espacement.
 
     Retourne:
         tuple (placements, tous_places)
     """
+    if espacement_bord is None:
+        espacement_bord = espacement
+
     if not polygones:
         return [], True
 
@@ -69,8 +75,8 @@ def calculer_nesting(
     placements: List[PlacementType] = []
     nb_non_places = 0
 
-    x_courant = espacement
-    y_courant = espacement
+    x_courant = espacement_bord
+    y_courant = espacement_bord
     hauteur_rangee = 0.0
 
     for idx in indices_tries:
@@ -79,19 +85,19 @@ def calculer_nesting(
         largeur_piece = maxx - minx
         hauteur_piece = maxy - miny
 
-        if largeur_piece + 2 * espacement > largeur_plaque:
+        if largeur_piece + 2 * espacement_bord > largeur_plaque:
             nb_non_places += 1
             continue
-        if hauteur_piece + 2 * espacement > hauteur_plaque:
+        if hauteur_piece + 2 * espacement_bord > hauteur_plaque:
             nb_non_places += 1
             continue
 
-        if x_courant + largeur_piece + espacement > largeur_plaque:
-            x_courant = espacement
+        if x_courant + largeur_piece + espacement_bord > largeur_plaque:
+            x_courant = espacement_bord
             y_courant += hauteur_rangee + espacement
             hauteur_rangee = 0.0
 
-        if y_courant + hauteur_piece + espacement > hauteur_plaque:
+        if y_courant + hauteur_piece + espacement_bord > hauteur_plaque:
             nb_non_places += 1
             continue
 
@@ -116,7 +122,8 @@ def calculer_nesting_optimise(
     hauteur_plaque: float,
     espacement: float,
     callback_progression: Optional[Callable[[int, int], None]] = None,
-    methode: str = 'multi'
+    methode: str = 'multi',
+    espacement_bord: Optional[float] = None,
 ) -> Tuple[List[PlacementType], bool]:
     """
     Nesting optimisé : minimise l'aire de la boîte englobante des pièces placées.
@@ -148,15 +155,20 @@ def calculer_nesting_optimise(
         polygones              : liste de Polygon shapely à placer
         largeur_plaque         : largeur maximale de la plaque (mm)
         hauteur_plaque         : hauteur maximale de la plaque (mm)
-        espacement             : distance minimum pièce-pièce et pièce-bord (mm)
+        espacement             : distance minimum entre pièces (mm)
         callback_progression   : fonction(etape, total) appelée à chaque pièce
         methode                : 'aire' | 'perimetre' | 'dim_max' | 'multi'
+        espacement_bord        : distance minimum pièces/bord (mm). Si None,
+                                 utilise la valeur de espacement.
 
     Retourne:
         tuple (placements, tous_places)
           - placements : liste de (polygone_décalé, ox, oy, idx_original)
           - tous_places : True si toutes les pièces ont pu être placées
     """
+    if espacement_bord is None:
+        espacement_bord = espacement
+
     if not polygones:
         return [], True
 
@@ -201,7 +213,8 @@ def calculer_nesting_optimise(
                 callback_progression(_i * n + etape, total_etapes)
 
         places, nb_non = _run_une_sequence(
-            ordre, polygones, largeur_plaque, hauteur_plaque, espacement, _cb
+            ordre, polygones, largeur_plaque, hauteur_plaque,
+            espacement, _cb, espacement_bord
         )
 
         # Score : priorité au plus grand nombre de pièces placées,
@@ -236,7 +249,8 @@ def _run_une_sequence(
     largeur_plaque: float,
     hauteur_plaque: float,
     espacement: float,
-    callback: Optional[Callable[[int, int], None]] = None
+    callback: Optional[Callable[[int, int], None]] = None,
+    espacement_bord: Optional[float] = None,
 ) -> Tuple[List[PlacementType], int]:
     """
     Exécute l'algorithme Bottom-Left Fill + Rotation pour un ordre de pièces donné.
@@ -244,6 +258,9 @@ def _run_une_sequence(
     Retourne:
         (places, nb_non_places)
     """
+    if espacement_bord is None:
+        espacement_bord = espacement
+
     places: List[PlacementType] = []
     placed_buffered: List[Polygon] = []
     nb_non = 0
@@ -256,7 +273,11 @@ def _run_une_sequence(
         meilleur: Optional[PlacementType] = None
         meilleur_score: float = float('inf')
 
-        candidats = _candidats_coins(places, espacement)
+        # Candidats classiques sur la plaque
+        candidats = _candidats_coins(places, espacement, espacement_bord)
+
+        # Zones utilisables à l'intérieur des trous des pièces déjà placées
+        zones_trous = _extraire_zones_trous(places, espacement)
 
         for angle in _ANGLES_OPTIMISE:
             # --- Rotation + normalisation (coin bas-gauche à l'origine) ---
@@ -266,32 +287,53 @@ def _run_une_sequence(
             pw = bmax_x - bmin_x
             ph = bmax_y - bmin_y
 
-            if pw + 2 * espacement > largeur_plaque:
-                continue
-            if ph + 2 * espacement > hauteur_plaque:
-                continue
-
             poly_norm = translate(poly_r, -bmin_x, -bmin_y)
 
-            for cx, cy in candidats:
-                if cx < espacement - 1e-9:
-                    continue
-                if cy < espacement - 1e-9:
-                    continue
-                if cx + pw + espacement > largeur_plaque + 1e-9:
-                    continue
-                if cy + ph + espacement > hauteur_plaque + 1e-9:
-                    continue
+            # ── Candidats sur la plaque (placement classique) ────────────────
+            if pw + 2 * espacement_bord <= largeur_plaque and \
+               ph + 2 * espacement_bord <= hauteur_plaque:
 
-                if not _collision_libre(poly_norm, cx, cy, pw, ph, placed_buffered):
-                    continue
+                for cx, cy in candidats:
+                    if cx < espacement_bord - 1e-9:
+                        continue
+                    if cy < espacement_bord - 1e-9:
+                        continue
+                    if cx + pw + espacement_bord > largeur_plaque + 1e-9:
+                        continue
+                    if cy + ph + espacement_bord > hauteur_plaque + 1e-9:
+                        continue
 
-                poly_place = translate(poly_norm, cx, cy)
-                score = _score_bbox(places, poly_place)
+                    if not _collision_libre(poly_norm, cx, cy, pw, ph, placed_buffered):
+                        continue
 
-                if score < meilleur_score:
-                    meilleur_score = score
-                    meilleur = (poly_place, cx, cy, idx)
+                    poly_place = translate(poly_norm, cx, cy)
+                    score = _score_bbox(places, poly_place)
+
+                    if score < meilleur_score:
+                        meilleur_score = score
+                        meilleur = (poly_place, cx, cy, idx)
+
+            # ── Candidats dans les trous des pièces placées ──────────────────
+            # Une pièce dans un trou ne peut qu'améliorer (ou égaler) le score
+            # car elle n'étend pas la bbox globale. On lui donne une légère
+            # préférence (−1e-6) pour départager les égalités.
+            for trou_zone in zones_trous:
+                for cx, cy in _candidats_dans_trou(trou_zone, pw, ph):
+                    poly_place = translate(poly_norm, cx, cy)
+
+                    # La pièce doit être entièrement contenue dans la zone du trou
+                    if not trou_zone.contains(poly_place):
+                        continue
+
+                    # Pas de collision avec les pièces déjà placées
+                    if not _collision_libre(poly_norm, cx, cy, pw, ph, placed_buffered):
+                        continue
+
+                    score = _score_bbox(places, poly_place) - 1e-6
+
+                    if score < meilleur_score:
+                        meilleur_score = score
+                        meilleur = (poly_place, cx, cy, idx)
 
         if meilleur is not None:
             poly_place, cx, cy, idx_orig = meilleur
@@ -310,22 +352,65 @@ def _run_une_sequence(
 def calculer_surface_utilisee(
     placements: List[PlacementType],
     largeur_plaque: float,
-    hauteur_plaque: float
+    hauteur_plaque: float,
+    espacement_pieces: float = 0.0,
+    espacement_bord: float = 0.0,
 ) -> float:
-    """Taux d'utilisation de la plaque en % (surface pièces / surface plaque)."""
-    if not placements or largeur_plaque <= 0 or hauteur_plaque <= 0:
+    """
+    Taux de remplissage (%) selon la formule géométrique :
+
+        remplissage = (S1 + L2·Epp/2 + L3·(Epb − Epp/2)) / S3
+
+    où :
+        S1  = surface totale des pièces (mm²)
+        L2  = somme des périmètres extérieurs des pièces (mm)
+        S3  = surface de la boîte englobante des pièces (mm²)
+        L3  = périmètre de la boîte englobante (mm)
+        Epp = espacement pièce-pièce (mm)
+        Epb = espacement pièce-bord (mm)
+
+    Interprétation : S1 représente les pièces, L2·Epp/2 la surface des
+    demi-marges inter-pièces, L3·(Epb−Epp/2) la bande de bord corrigée
+    de la demi-marge déjà comptée sur le périmètre de la bbox. Le tout
+    rapporté à la surface de la boîte englobante donne l'efficacité de placement.
+
+    Si les deux espacements sont nuls → formule réduite à S1/S3.
+    Le dénominateur utilise toujours la bbox brute des pièces (sans Epb),
+    car l'affichage de la taille tôle est géré séparément via
+    calculer_bbox_placements(espacement_bord=...).
+    """
+    if not placements:
         return 0.0
-    surface_pieces = sum(poly.area for poly, _, _, _ in placements)
-    return min(100.0, surface_pieces / (largeur_plaque * hauteur_plaque) * 100.0)
+
+    # S1 : surface totale des pièces
+    S1 = sum(poly.area for poly, *_ in placements)
+
+    # L2 : somme des périmètres extérieurs
+    L2 = sum(poly.exterior.length for poly, *_ in placements)
+
+    # Boîte englobante brute (sans marge bord)
+    bw, bh = calculer_bbox_placements(placements, espacement_bord=0.0)
+    S3 = bw * bh
+    if S3 <= 0:
+        return 0.0
+
+    # L3 : périmètre de la boîte englobante
+    L3 = 2.0 * (bw + bh)
+
+    numerateur = S1 + L2 * espacement_pieces / 2.0 + L3 * (espacement_bord - espacement_pieces / 2.0)
+    return min(100.0, numerateur / S3 * 100.0)
 
 
 def calculer_bbox_placements(
-    placements: List[PlacementType]
+    placements: List[PlacementType],
+    espacement_bord: float = 0.0,
 ) -> Tuple[float, float]:
     """
-    Retourne (largeur, hauteur) de la boîte englobante minimale de tous
-    les polygones placés. Utile pour afficher la taille réelle utilisée
-    après un nesting optimisé.
+    Retourne (largeur, hauteur) de la boîte englobante des polygones placés,
+    augmentée de 2×espacement_bord pour obtenir la taille de tôle minimale.
+
+    Avec espacement_bord=0 (défaut) : bbox brute des pièces.
+    Avec espacement_bord>0          : taille tôle minimum = bbox + 2×Epb.
     """
     if not placements:
         return 0.0, 0.0
@@ -333,14 +418,73 @@ def calculer_bbox_placements(
     min_y = min(poly.bounds[1] for poly, *_ in placements)
     max_x = max(poly.bounds[2] for poly, *_ in placements)
     max_y = max(poly.bounds[3] for poly, *_ in placements)
-    return max_x - min_x, max_y - min_y
+    return (max_x - min_x + 2 * espacement_bord,
+            max_y - min_y + 2 * espacement_bord)
 
 
 # =============================================================================
 # Fonctions internes de l'algorithme optimisé
 # =============================================================================
 
-def _candidats_coins(places: List[PlacementType], espacement: float) -> list:
+def _extraire_zones_trous(places: List[PlacementType], espacement: float) -> List[Polygon]:
+    """
+    Extrait les zones utilisables à l'intérieur des trous des pièces placées.
+
+    Chaque anneau intérieur (trou) est érodé de `espacement` pour garantir la
+    distance minimale entre la pièce insérée et le bord du trou.
+    Les zones trop petites (aire < 1 mm²) sont ignorées.
+    """
+    zones: List[Polygon] = []
+    for poly_placed, *_ in places:
+        for interior in poly_placed.interiors:
+            trou = Polygon(interior.coords)
+            zone = trou.buffer(-espacement) if espacement > 0 else trou
+            if zone is None or zone.is_empty or not zone.is_valid:
+                continue
+            if zone.area < 1.0:
+                continue
+            zones.append(zone)
+    return zones
+
+
+def _candidats_dans_trou(
+    trou_zone: Polygon,
+    pw: float,
+    ph: float,
+    nb_pas: int = 3
+) -> list:
+    """
+    Génère des candidats (cx, cy) pour placer une pièce de taille (pw × ph)
+    à l'intérieur d'une zone de trou.
+
+    (cx, cy) est le coin bas-gauche de la bounding-box de la pièce.
+    Un grid nb_pas × nb_pas est balayé dans la plage valide du coin bas-gauche
+    dans la bbox du trou, pour couvrir les positions possibles.
+
+    Retourne une liste vide si la pièce est trop grande pour le trou.
+    """
+    tz_minx, tz_miny, tz_maxx, tz_maxy = trou_zone.bounds
+    cx_min, cx_max = tz_minx, tz_maxx - pw
+    cy_min, cy_max = tz_miny, tz_maxy - ph
+
+    if cx_max < cx_min - 1e-6 or cy_max < cy_min - 1e-6:
+        return []   # Pièce plus grande que la bbox du trou → impossible
+
+    candidats = []
+    steps = nb_pas - 1 if nb_pas > 1 else 1
+    for i in range(nb_pas):
+        cx = cx_min + i * (cx_max - cx_min) / steps if steps else cx_min
+        for j in range(nb_pas):
+            cy = cy_min + j * (cy_max - cy_min) / steps if steps else cy_min
+            candidats.append((cx, cy))
+    return candidats
+
+
+def _candidats_coins(
+    places: List[PlacementType],
+    espacement: float,
+    espacement_bord: Optional[float] = None,
+) -> list:
     """
     Génère les positions candidates pour le prochain placement.
 
@@ -353,28 +497,31 @@ def _candidats_coins(places: List[PlacementType], espacement: float) -> list:
     2. Grille croisée (enrichissement) :
        Produit cartésien des bords droits (x1+espacement) × bords supérieurs
        (y1+espacement) de toutes les pièces placées, incluant les bords de
-       la plaque (espacement, espacement).
+       la plaque (espacement_bord, espacement_bord).
        Ces candidats supplémentaires permettent de « glisser » une pièce dans
        des espaces qui ne coïncident pas avec un unique coin existant.
 
     Le tri par (y, x) donne le critère Bottom-Left : on préfère les
     positions basses et à gauche, ce qui favorise un remplissage compact.
     """
+    if espacement_bord is None:
+        espacement_bord = espacement
+
     pts: set = set()
-    pts.add((espacement, espacement))
+    pts.add((espacement_bord, espacement_bord))
 
     # Accumulation des bords pour la grille croisée
-    right_xs = [espacement]   # bords droits + espacement
-    top_ys   = [espacement]   # bords supérieurs + espacement
+    right_xs = [espacement_bord]   # position initiale : bord gauche de plaque
+    top_ys   = [espacement_bord]   # position initiale : bord bas de plaque
 
     for poly_place, *_ in places:
         x0, y0, x1, y1 = poly_place.bounds
 
         # --- Coins classiques ---
-        pts.add((x1 + espacement, espacement))  # à droite, au ras du bas
-        pts.add((x1 + espacement, y0))          # à droite, aligné avec le bas de la pièce
-        pts.add((espacement, y1 + espacement))  # à gauche, au-dessus
-        pts.add((x0, y1 + espacement))          # aligné avec le bord gauche de la pièce
+        pts.add((x1 + espacement, espacement_bord))  # à droite, au ras du bas
+        pts.add((x1 + espacement, y0))               # à droite, aligné avec le bas de la pièce
+        pts.add((espacement_bord, y1 + espacement))  # à gauche, au-dessus
+        pts.add((x0, y1 + espacement))               # aligné avec le bord gauche de la pièce
 
         # --- Accumulation grille croisée ---
         right_xs.append(x1 + espacement)
