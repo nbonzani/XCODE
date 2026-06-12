@@ -1,15 +1,17 @@
-"""Fenetre principale (jalon 0).
+"""Fenetre principale (jalon 1).
 
-Fenetre PyQt6 minimale avec un smoke test de connexion : construit un
-``Settings`` depuis l'environnement, authentifie via la couche endpoints du
-moteur et affiche ``who_am_i``. Le test tourne dans un ``QThread`` worker pour
-ne pas figer l'UI (fondation du futur executeur batch, jalon 3).
+Selecteur de profil + acces a la gestion des profils (F7). Le test de
+connexion construit un ``Settings`` depuis le profil selectionne et son mot de
+passe (lu du Credential Manager), authentifie via la couche endpoints du moteur
+et affiche ``who_am_i``. Le test tourne dans un ``QThread`` worker pour ne pas
+figer l'UI (fondation du futur executeur batch, jalon 3).
 """
 
 from __future__ import annotations
 
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -21,18 +23,26 @@ from PyQt6.QtWidgets import (
 
 from threedx_cleaner import __version__
 from threedx_cleaner.core.connection import who_am_i
-from threedx_cleaner.credentials import build_settings_from_env
+from threedx_cleaner.credentials import profile_store, secret_store
+from threedx_cleaner.credentials.settings_builder import build_settings
+from threedx_cleaner.models.profile import Profile
+from threedx_cleaner.ui.profile_dialog import ProfileDialog
 
 
 class _ConnectionWorker(QThread):
-    """Execute le test de connexion hors thread UI."""
+    """Execute le test de connexion d'un profil hors thread UI."""
 
     succeeded = pyqtSignal(str)
     failed = pyqtSignal(str)
 
+    def __init__(self, profile: Profile, password: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._profile = profile
+        self._password = password
+
     def run(self) -> None:  # noqa: D102
         try:
-            settings = build_settings_from_env()
+            settings = build_settings(self._profile, self._password)
             result = who_am_i(settings)
             self.succeeded.emit(result.one_line())
         except Exception as exc:  # noqa: BLE001 — on rapporte tout motif a l'UI
@@ -40,7 +50,7 @@ class _ConnectionWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    """Fenetre principale de 3dx-cleaner (squelette jalon 0)."""
+    """Fenetre principale de 3dx-cleaner (jalon 1)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -54,12 +64,24 @@ class MainWindow(QMainWindow):
 
         intro = QLabel(
             "Purge controlee de donnees 3DEXPERIENCE (usage pedagogique).\n"
-            "Jalon 0 — smoke test de connexion via variables d'environnement "
-            "(THREEDX_BASE_URL / THREEDX_USERNAME / THREEDX_PASSWORD)."
+            "Selectionnez un profil puis testez la connexion."
         )
         intro.setWordWrap(True)
         root.addWidget(intro)
 
+        # --- Selecteur de profil ---
+        selector = QHBoxLayout()
+        selector.addWidget(QLabel("Profil :"))
+        self._profile_combo = QComboBox()
+        self._profile_combo.setMinimumWidth(260)
+        selector.addWidget(self._profile_combo)
+        self._manage_btn = QPushButton("Gerer les profils...")
+        self._manage_btn.clicked.connect(self._on_manage_profiles)
+        selector.addWidget(self._manage_btn)
+        selector.addStretch(1)
+        root.addLayout(selector)
+
+        # --- Actions ---
         actions = QHBoxLayout()
         self._test_btn = QPushButton("Tester la connexion")
         self._test_btn.clicked.connect(self._on_test_connection)
@@ -73,16 +95,61 @@ class MainWindow(QMainWindow):
         root.addWidget(self._log, stretch=1)
 
         self.setCentralWidget(central)
+        self._reload_profiles()
 
-    # --- Smoke test ---
+    # --- Profils ---
+
+    def _reload_profiles(self, *, select: str | None = None) -> None:
+        current = select or self._profile_combo.currentText()
+        self._profile_combo.blockSignals(True)
+        self._profile_combo.clear()
+        try:
+            names = [p.name for p in profile_store.load()]
+        except Exception as exc:  # noqa: BLE001
+            names = []
+            self._append(f"Lecture des profils impossible : {exc}")
+        self._profile_combo.addItems(names)
+        if current in names:
+            self._profile_combo.setCurrentIndex(names.index(current))
+        self._profile_combo.blockSignals(False)
+
+        has_profiles = bool(names)
+        self._test_btn.setEnabled(has_profiles)
+        if not has_profiles:
+            self._log.setPlaceholderText(
+                "Aucun profil. Cliquez « Gerer les profils... » pour en creer un."
+            )
+
+    def _on_manage_profiles(self) -> None:
+        dialog = ProfileDialog(self)
+        dialog.exec()
+        self._reload_profiles()
+
+    # --- Test de connexion ---
 
     def _on_test_connection(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
-        self._test_btn.setEnabled(False)
-        self._append("Connexion en cours...")
+        name = self._profile_combo.currentText()
+        if not name:
+            self._append("Aucun profil selectionne.")
+            return
+        profile = profile_store.get(name)
+        if profile is None:
+            self._append(f"Profil « {name} » introuvable.")
+            return
+        password = secret_store.get_password(name)
+        if not password:
+            self._append(
+                f"Aucun mot de passe enregistre pour « {name} ». "
+                "Ouvrez « Gerer les profils... » pour le saisir."
+            )
+            return
 
-        self._worker = _ConnectionWorker(self)
+        self._test_btn.setEnabled(False)
+        self._append(f"Connexion au profil « {name} » en cours...")
+
+        self._worker = _ConnectionWorker(profile, password, self)
         self._worker.succeeded.connect(self._on_success)
         self._worker.failed.connect(self._on_failure)
         self._worker.finished.connect(lambda: self._test_btn.setEnabled(True))

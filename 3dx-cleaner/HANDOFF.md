@@ -1,7 +1,7 @@
 # HANDOFF — 3dx-cleaner
 
 > État de passation pour reprise en nouvelle session. Dernière mise à jour :
-> 2026-06-13, fin du **jalon 0**.
+> 2026-06-13, **code du jalon 1 terminé** (validation live restante).
 
 ## 1. Ce qu'est le projet
 
@@ -115,19 +115,28 @@ $env:THREEDX_PASSWORD = "..."
 - Interdits sans permission : `git push`, `git commit -a`, afficher des
   secrets, installer un paquet hors `pyproject.toml`.
 
-## 7. Prochaine étape — JALON 1 (F7)
+## 7. JALON 1 (F7) — CODE FAIT, validation live restante
 
-Gestion des identifiants multi-comptes/multi-serveurs :
-- `credentials/profile_store.py` : CRUD de profils `Profile` en TOML sous
-  `%APPDATA%/3dx-cleaner/profiles.toml` (config NON sensible uniquement).
-- `credentials/secret_store.py` : mot de passe via `keyring` (service
-  `3dx-cleaner`, username = `Profile.name`). Jamais en clair.
-- `ui/profile_dialog.py` : ajout/édition/suppression/**test de connexion**
-  d'un profil (réutilise `core.connection.who_am_i` + `build_settings`).
-- `ui/main_window.py` : sélecteur de profil au lancement.
-- Tests : profile_store (round-trip TOML), secret_store (keyring mocké).
-- Critère de sortie : test de connexion OK sur un profil **on-prem** et un
-  profil **cloud**.
+Gestion des identifiants multi-comptes/multi-serveurs. Implémenté :
+- `credentials/secret_store.py` : `set/get/delete/has_password` via `keyring`
+  (service `3dx-cleaner`, username = `Profile.name`). Jamais de secret loggé.
+- `credentials/profile_store.py` : CRUD TOML (`tomllib` + **`tomli-w`**, nouvelle
+  dép. ajoutée à pyproject) sous `%APPDATA%/3dx-cleaner/profiles.toml`, dossier
+  surchargé par `THREEDX_CONFIG_DIR` (testable). Écriture atomique. `delete`
+  purge aussi le secret keyring.
+- `ui/profile_dialog.py` : dialogue CRUD + **test de connexion** en `QThread`
+  (réutilise `who_am_i` + `build_settings`). Mot de passe masqué, jamais
+  persisté en clair ; champ vide à l'édition = secret inchangé ; renommage
+  migre le secret.
+- `ui/main_window.py` : sélecteur de profil (combo) + bouton « Gérer les
+  profils » ; le test bascule de l'env vers `build_settings(profil, keyring)`.
+- Tests : `test_secret_store.py` + `test_profile_store.py` + `conftest.py`
+  (backend keyring en mémoire `InMemoryKeyring`, isolation `config_dir`).
+
+**Vérifié** : `pytest -q` → 23/23 ; UI s'instancie offscreen (MainWindow +
+ProfileDialog). **NON vérifié** (= critère de sortie) : test de connexion live
+réussi sur un profil **on-prem** ET un profil **cloud** depuis l'UI (nécessite
+identifiants réels + réseau Polytech / accès cloud).
 
 Jalons suivants : J2 = F3 (recherche filtrée + tableau à cases + tailles,
 lecture seule) · J3 = F4+F5+F6 (normalisation, pré-vol, exécuteur batch,
