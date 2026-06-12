@@ -172,7 +172,30 @@ Recherche filtrée + tableau à cases + pagination. Implémenté :
 format taille OK). **NON vérifié** (réseau requis) : recherche live, pertinence
 du prédicat collabspace sur le tenant, format réel de la taille (non câblé).
 
-Jalons suivants : J3 = F4+F5+F6 (normalisation, pré-vol, exécuteur batch,
-rapport) sur objets `MCP_` jetables — **inclut la capture HAR taille** et
-l'activation de `ModelerFilesSizeResolver` · J4 = F1+F2 (purges massives, double
-confirmation) · J5 = packaging PyInstaller.
+## 9. F5 pré-vol (LECTURE SEULE) — anticipé, code fait
+
+`core/preflight.py` : `run_preflight(client, rows)` agrège par objet, **sans
+aucune écriture** : droit de suppression (`check_delete_access`), suppression
+logique vs **physique irréversible** + cascade `wholeStructure` disponible
+(`get_delete_options`), where-used (`navigation.get_relation_count`). Dispatch
+on-prem/cloud via `deployment_mode` (variantes `*_cloud`). Erreurs partielles
+→ `notes` (jamais levées). Modèle `PreflightVerdict` (`deletable`,
+`physical_delete`, `has_dependents`). Tests `test_preflight.py` (on-prem, cloud,
+erreurs, sans physical_id). ⚠️ Pas encore branché sur l'UI ; aucune confirmation
+ni suppression n'existe (réservé J3/J4).
+
+## 10. Prochaine étape — JALON 3 (zone d'écriture, à superviser)
+
+Cf. `docs/prompt-session-jalon3.md`. **Contient les premières opérations
+destructives — à valider explicitement.** Reste à faire :
+- **Capture HAR taille** (skill `har-capture-3dx`) sur un Document AVEC fichier →
+  contrat de `GET .../documents/{id}/files` → activer `ModelerFilesSizeResolver`.
+- **F4 normalize** (`core/normalize.py`) : unreserve + demote In Work, en
+  **dry-run/plan par défaut**, exécution gardée par confirmation UI.
+- **Exécuteur batch** (`core/executor.py`) : worker Qt + pool borné, progression,
+  agrégation d'erreurs typées ; **dry-run par défaut**.
+- **F6 rapport** (`core/report.py`) : log horodaté local par campagne.
+- Brancher `preflight.run_preflight` sur la sélection F3 (UI de récap pré-vol).
+
+Jalons suivants : J4 = F1+F2 (purges massives, double confirmation) · J5 =
+packaging PyInstaller.
