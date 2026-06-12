@@ -30,17 +30,19 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from threedx_cleaner.core.connection import who_am_i
+from threedx_cleaner.core.connection import SecurityContextOption, probe
 from threedx_cleaner.credentials import profile_store, secret_store
 from threedx_cleaner.credentials.settings_builder import build_settings
 from threedx_cleaner.models.profile import Profile
 
 
 class _TestConnectionWorker(QThread):
-    """Teste la connexion d'un profil hors thread UI."""
+    """Teste la connexion d'un profil hors thread UI et recupere les contextes."""
 
-    succeeded = pyqtSignal(str)
-    failed = pyqtSignal(str)
+    succeeded = pyqtSignal(str)  # message who_am_i
+    contexts_ready = pyqtSignal(list)  # list[SecurityContextOption]
+    contexts_warn = pyqtSignal(str)  # connexion OK mais contextes indispo
+    failed = pyqtSignal(str)  # echec d'auth/reseau
 
     def __init__(self, profile: Profile, password: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -50,10 +52,15 @@ class _TestConnectionWorker(QThread):
     def run(self) -> None:  # noqa: D102
         try:
             settings = build_settings(self._profile, self._password)
-            result = who_am_i(settings)
-            self.succeeded.emit(result.one_line())
+            result = probe(settings)
         except Exception as exc:  # noqa: BLE001 — on rapporte tout motif a l'UI
             self.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.succeeded.emit(result.who.one_line())
+        if result.contexts_error:
+            self.contexts_warn.emit(result.contexts_error)
+        else:
+            self.contexts_ready.emit(result.contexts)
 
 
 class ProfileDialog(QDialog):
@@ -98,8 +105,12 @@ class ProfileDialog(QDialog):
         self._base_url.setPlaceholderText("https://3dexperience2025.univ-lorraine.fr")
         self._tenant_id = QLineEdit()
         self._platform_id = QLineEdit()
-        self._security_context = QLineEdit()
-        self._security_context.setPlaceholderText("ctx::<role>.<org>.<collabspace> (optionnel)")
+        self._security_context = QComboBox()
+        self._security_context.setEditable(True)
+        self._security_context.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._security_context.lineEdit().setPlaceholderText(
+            "Testez la connexion pour lister les contextes (optionnel)"
+        )
         self._verify_ssl = QCheckBox("Verifier le certificat TLS")
         self._verify_ssl.setChecked(True)
         self._ca_bundle = QLineEdit()
@@ -176,7 +187,7 @@ class ProfileDialog(QDialog):
         self._base_url.setText(profile.base_url)
         self._tenant_id.setText(profile.tenant_id)
         self._platform_id.setText(profile.platform_id)
-        self._security_context.setText(profile.security_context)
+        self._security_context.setCurrentText(profile.security_context)
         self._verify_ssl.setChecked(profile.verify_ssl)
         self._ca_bundle.setText(profile.ca_bundle)
         self._password.clear()
@@ -198,7 +209,7 @@ class ProfileDialog(QDialog):
         self._base_url.clear()
         self._tenant_id.clear()
         self._platform_id.clear()
-        self._security_context.clear()
+        self._security_context.setCurrentText("")
         self._verify_ssl.setChecked(True)
         self._ca_bundle.clear()
         self._password.clear()
@@ -226,7 +237,7 @@ class ProfileDialog(QDialog):
             base_url=self._base_url.text().strip() if is_on_prem else "",
             tenant_id="" if is_on_prem else self._tenant_id.text().strip(),
             platform_id="" if is_on_prem else self._platform_id.text().strip(),
-            security_context=self._security_context.text().strip(),
+            security_context=self._security_context.currentText().strip(),
             verify_ssl=self._verify_ssl.isChecked(),
             ca_bundle=self._ca_bundle.text().strip(),
         )
@@ -304,9 +315,41 @@ class ProfileDialog(QDialog):
         self._set_status("Connexion en cours...")
         self._worker = _TestConnectionWorker(profile, password, self)
         self._worker.succeeded.connect(self._on_test_ok)
+        self._worker.contexts_ready.connect(self._on_contexts_ready)
+        self._worker.contexts_warn.connect(self._on_contexts_warn)
         self._worker.failed.connect(self._on_test_ko)
         self._worker.finished.connect(lambda: self._test_btn.setEnabled(True))
         self._worker.start()
+
+    def _populate_contexts(self, options: list[SecurityContextOption]) -> None:
+        """Remplit la liste deroulante des contextes en preservant la saisie."""
+        current = self._security_context.currentText()
+        self._security_context.blockSignals(True)
+        self._security_context.clear()
+        for opt in options:
+            self._security_context.addItem(opt.name)
+            idx = self._security_context.count() - 1
+            if opt.title and opt.title != opt.name:
+                self._security_context.setItemData(
+                    idx, opt.title, Qt.ItemDataRole.ToolTipRole
+                )
+        self._security_context.setCurrentText(current)
+        self._security_context.blockSignals(False)
+
+    def _on_contexts_ready(self, options: list[SecurityContextOption]) -> None:
+        self._populate_contexts(options)
+        if options:
+            self._set_status(
+                f"OK — connexion reussie, {len(options)} contexte(s) disponible(s). "
+                "Choisissez-en un dans la liste."
+            )
+        else:
+            self._set_status("OK — connexion reussie, aucun contexte retourne.")
+
+    def _on_contexts_warn(self, reason: str) -> None:
+        self._set_status(
+            f"OK — connexion reussie, mais contextes indisponibles : {reason}"
+        )
 
     def _on_test_ok(self, message: str) -> None:
         self._set_status(f"OK — {message}")

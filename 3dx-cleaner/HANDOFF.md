@@ -124,10 +124,15 @@ Gestion des identifiants multi-comptes/multi-serveurs. Implémenté :
   dép. ajoutée à pyproject) sous `%APPDATA%/3dx-cleaner/profiles.toml`, dossier
   surchargé par `THREEDX_CONFIG_DIR` (testable). Écriture atomique. `delete`
   purge aussi le secret keyring.
-- `ui/profile_dialog.py` : dialogue CRUD + **test de connexion** en `QThread`
-  (réutilise `who_am_i` + `build_settings`). Mot de passe masqué, jamais
-  persisté en clair ; champ vide à l'édition = secret inchangé ; renommage
-  migre le secret.
+- `ui/profile_dialog.py` : dialogue CRUD + **test de connexion** en `QThread`.
+  Mot de passe masqué, jamais persisté en clair ; champ vide à l'édition =
+  secret inchangé ; renommage migre le secret. Le **security_context est une
+  liste déroulante** peuplée après le test de connexion (cf. `connection.probe`)
+  — éditable (saisie libre préservée), tooltip = libellé du contexte.
+- `core/connection.py` : `probe(settings)` (1 seul client → who_am_i +
+  `list_security_contexts`, dédoublonné) ; échec des contextes non bloquant
+  (`ConnectionProbe.contexts_error`, ex. cloud non porté). Câble
+  `admin.list_security_contexts` (on-prem `getallctx`, fallback dgn/adm).
 - `ui/main_window.py` : sélecteur de profil (combo) + bouton « Gérer les
   profils » ; le test bascule de l'env vers `build_settings(profil, keyring)`.
 - Tests : `test_secret_store.py` + `test_profile_store.py` + `conftest.py`
