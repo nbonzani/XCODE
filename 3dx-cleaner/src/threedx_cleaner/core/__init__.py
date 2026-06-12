@@ -1,8 +1,10 @@
 """Orchestration — appelle la couche endpoints de ``threedx_mcp``.
 
-Modules a venir par jalon :
-- ``connection``   : test de connexion / who_am_i (jalon 0).
-- ``document_query`` : F3 recherche filtree + tailles (jalon 2).
+Modules par jalon :
+- ``connection``       : test de connexion / who_am_i + probe contextes (jalon 0-1).
+- ``document_query``   : F3 recherche filtree + pagination (jalon 2).
+- ``collabspace_query``: F3 listing des collabspaces pour le filtre (jalon 2).
+- ``size_resolver``    : F3 architecture taille (stub tant que contrat non capture).
 - ``normalize``    : F4 unreserve + demote In Work (jalon 3).
 - ``preflight``    : F5 checkDeleteAccess, locks, where-used (jalon 3).
 - ``executor``     : batch + progression + agregation d'erreurs (jalon 3).

@@ -1,7 +1,7 @@
 # HANDOFF — 3dx-cleaner
 
 > État de passation pour reprise en nouvelle session. Dernière mise à jour :
-> 2026-06-13, **code du jalon 1 terminé** (validation live restante).
+> 2026-06-13, **code des jalons 1 et 2 terminé** (validation live restante).
 
 ## 1. Ce qu'est le projet
 
@@ -143,7 +143,36 @@ ProfileDialog). **NON vérifié** (= critère de sortie) : test de connexion liv
 réussi sur un profil **on-prem** ET un profil **cloud** depuis l'UI (nécessite
 identifiants réels + réseau Polytech / accès cloud).
 
-Jalons suivants : J2 = F3 (recherche filtrée + tableau à cases + tailles,
-lecture seule) · J3 = F4+F5+F6 (normalisation, pré-vol, exécuteur batch,
-rapport) sur objets `MCP_` jetables · J4 = F1+F2 (purges massives, double
+## 8. JALON 2 (F3 lecture seule) — CODE FAIT, validation live restante
+
+Recherche filtrée + tableau à cases + pagination. Implémenté :
+- `core/document_query.py` : `search_page` / `search_all` (énumération paginée
+  bornée `MAX_ENUMERATION=5000`, anti-boucle sur curseur répété) câblé sur
+  `endpoints.search.search_advanced`. Filtres : texte/UQL, types, owner,
+  maturité, dates modifié, **collabspace** (clause `[ds6w:collabspace]` —
+  prédicat ds6w standard, **à confirmer sur le tenant** au test live).
+  Modèle `ObjectRow` (taille = `None` à ce stade).
+- `core/collabspace_query.py` : `list_space_names` (pagination) pour alimenter
+  le filtre collabspace.
+- `core/size_resolver.py` : **architecture taille** — `SizeResolver` (protocole),
+  `NullSizeResolver` (défaut, tout à `None`), `ModelerFilesSizeResolver` (**STUB
+  qui lève `SizeContractNotCaptured`**). ⚠️ **Contrat REST de taille NON capturé**
+  (endpoint `/files` vu seulement à vide) → à faire en J3 via skill
+  `har-capture-3dx` sur un Document AVEC fichier, puis activer le résolveur.
+  `format_size()` pour l'affichage (« — » si inconnue).
+- `ui/search_panel.py` : `SearchPanel` (QWidget) — formulaire de filtres,
+  `QTableWidget` à cases (colonnes Type/Identifiant/Titre/Rév/Statut/Propriétaire/
+  Modifié/**Taille**), pagination « Charger la suite », « Tout énumérer »,
+  cocher/décocher, récap sélection. **Lecture seule** (aucune action d'écriture).
+  `selected_rows()` expose la sélection pour J3/J4. Recherche en `QThread`.
+- `ui/main_window.py` : bouton « Explorer les objets… » → ouvre `SearchPanel`
+  dans une fenêtre, à partir du profil sélectionné + secret keyring.
+
+**Vérifié** : `pytest -q` → 47/47 ; panneau instancié offscreen (append/sélection/
+format taille OK). **NON vérifié** (réseau requis) : recherche live, pertinence
+du prédicat collabspace sur le tenant, format réel de la taille (non câblé).
+
+Jalons suivants : J3 = F4+F5+F6 (normalisation, pré-vol, exécuteur batch,
+rapport) sur objets `MCP_` jetables — **inclut la capture HAR taille** et
+l'activation de `ModelerFilesSizeResolver` · J4 = F1+F2 (purges massives, double
 confirmation) · J5 = packaging PyInstaller.

@@ -27,6 +27,7 @@ from threedx_cleaner.credentials import profile_store, secret_store
 from threedx_cleaner.credentials.settings_builder import build_settings
 from threedx_cleaner.models.profile import Profile
 from threedx_cleaner.ui.profile_dialog import ProfileDialog
+from threedx_cleaner.ui.search_panel import SearchPanel
 
 
 class _ConnectionWorker(QThread):
@@ -85,9 +86,14 @@ class MainWindow(QMainWindow):
         actions = QHBoxLayout()
         self._test_btn = QPushButton("Tester la connexion")
         self._test_btn.clicked.connect(self._on_test_connection)
+        self._explore_btn = QPushButton("Explorer les objets...")
+        self._explore_btn.clicked.connect(self._on_explore)
         actions.addWidget(self._test_btn)
+        actions.addWidget(self._explore_btn)
         actions.addStretch(1)
         root.addLayout(actions)
+
+        self._explorer: QMainWindow | None = None
 
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
@@ -115,6 +121,7 @@ class MainWindow(QMainWindow):
 
         has_profiles = bool(names)
         self._test_btn.setEnabled(has_profiles)
+        self._explore_btn.setEnabled(has_profiles)
         if not has_profiles:
             self._log.setPlaceholderText(
                 "Aucun profil. Cliquez « Gerer les profils... » pour en creer un."
@@ -124,6 +131,37 @@ class MainWindow(QMainWindow):
         dialog = ProfileDialog(self)
         dialog.exec()
         self._reload_profiles()
+
+    # --- Exploration (F3) ---
+
+    def _on_explore(self) -> None:
+        name = self._profile_combo.currentText()
+        if not name:
+            self._append("Aucun profil selectionne.")
+            return
+        profile = profile_store.get(name)
+        if profile is None:
+            self._append(f"Profil « {name} » introuvable.")
+            return
+        password = secret_store.get_password(name)
+        if not password:
+            self._append(
+                f"Aucun mot de passe enregistre pour « {name} ». "
+                "Ouvrez « Gerer les profils... » pour le saisir."
+            )
+            return
+        try:
+            settings = build_settings(profile, password)
+        except Exception as exc:  # noqa: BLE001
+            self._append(f"Configuration invalide : {type(exc).__name__}: {exc}")
+            return
+
+        window = QMainWindow(self)
+        window.setWindowTitle(f"Explorer — {name}")
+        window.resize(960, 600)
+        window.setCentralWidget(SearchPanel(settings, window))
+        window.show()
+        self._explorer = window  # conserve une reference (evite le GC)
 
     # --- Test de connexion ---
 
