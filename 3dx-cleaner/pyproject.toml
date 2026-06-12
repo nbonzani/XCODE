@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "3dx-cleaner"
+version = "0.1.0"
+description = "GUI Windows d'administration et purge contrôlée de données 3DEXPERIENCE (usage pédagogique). Couche GUI + orchestration batch par-dessus le moteur threedx_mcp."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "Nicolas Bonzani", email = "nbonzani@gmail.com" }]
+keywords = ["3dexperience", "plm", "dassault", "gui", "pyqt6"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: Microsoft :: Windows",
+    "Private :: Do Not Upload",
+]
+
+# NOTE moteur : le package `threedx_mcp` (distribution `3dx-mcp` v0.6.0,
+# repo D:\CLAUDE\XCODE\3dx-mcp) n'est PUBLIE sur aucun index et son nom de
+# distribution varie selon le clone installe (3dx-mcp / threedx-mcp-gdt /
+# threedx-mcp-gdt-cloud). On ne peut donc pas le declarer en dependance pip
+# resolvable. C'est un PREREQUIS : l'installer en editable AVANT ce projet
+#     pip install -e D:\CLAUDE\XCODE\3dx-mcp
+# La presence du module est verifiee a l'import (threedx_cleaner.__init__).
+# PyInstaller l'embarquera dans l'executable final (jalon 5).
+dependencies = [
+    "PyQt6>=6.6",
+    "keyring>=24",
+    "pydantic>=2.6",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-qt>=4.4",
+]
+build = [
+    "pyinstaller>=6.0",
+]
+
+[project.gui-scripts]
+# gui-scripts (pas scripts) : pas de console Windows au lancement.
+3dx-cleaner = "threedx_cleaner.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]
+markers = [
+    "integration: necessite un profil + acces a un serveur 3DEXPERIENCE cible (skip par defaut)",
+]
