@@ -7,8 +7,10 @@ récapitulatif de sélection. **Aucune action d'écriture** : ce panneau ne fait
 que lire et sélectionner — la sélection sera consommée par les jalons suivants
 (normalisation, pré-vol, purge).
 
-La colonne « Taille » est présente mais affiche « — » tant que le contrat REST
-de taille n'est pas capturé (cf. :mod:`threedx_cleaner.core.size_resolver`).
+La colonne « Taille » est renseignée à la demande, après chaque page, par un
+:class:`~threedx_cleaner.core.size_resolver.ModelerFilesSizeResolver` exécuté
+dans un worker Qt (appels réseau ``/files`` hors thread UI). Elle affiche « — »
+pour un objet sans fichier ou de type non documentaire.
 """
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -36,7 +37,25 @@ from threedx_mcp.config import Settings
 
 from threedx_cleaner.core import collabspace_query, document_query
 from threedx_cleaner.core.document_query import ObjectRow, SearchFilters, SearchPage
-from threedx_cleaner.core.size_resolver import format_size
+from threedx_cleaner.core.properties_resolver import (
+    PropertiesResolver,
+    PropInfo,
+    ReadAttributesPropertiesResolver,
+    format_lock,
+)
+from threedx_cleaner.core.size_resolver import (
+    ModelerFilesSizeResolver,
+    SizeResolver,
+    format_size,
+)
+from threedx_cleaner.ui.checkable_combo import CheckableComboBox
+
+#: Maturités usuelles proposées d'emblée (NLS FR + EN), complétées par les
+#: valeurs réellement rencontrées dans les résultats.
+_DEFAULT_MATURITIES = (
+    "In Work", "Frozen", "Released", "Obsolete",
+    "En traitement", "Gelé", "Validé", "Obsolète",
+)
 
 #: En-têtes des colonnes de données (hors colonne 0 = case à cocher).
 _COLUMNS = (
@@ -44,11 +63,15 @@ _COLUMNS = (
     "Identifiant",
     "Titre",
     "Rév.",
-    "Statut",
+    "Maturité",
+    "Verrouillage",
     "Propriétaire",
     "Modifié",
     "Taille",
 )
+
+#: Largeurs initiales (px) par colonne de données (clé = index dans _COLUMNS).
+_COLUMN_WIDTHS = (110, 150, 240, 55, 110, 130, 130, 140, 90)
 
 
 class _SearchWorker(QThread):
@@ -105,6 +128,52 @@ class _CollabspacesWorker(QThread):
         self.ready.emit(names)
 
 
+class _SizeWorker(QThread):
+    """Résout la taille d'un lot de lignes hors thread UI (appels ``/files``)."""
+
+    resolved = pyqtSignal(dict)  # {row.key: size_bytes | None}
+
+    def __init__(
+        self,
+        resolver: SizeResolver,
+        rows: list[ObjectRow],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._resolver = resolver
+        self._rows = rows
+
+    def run(self) -> None:  # noqa: D102
+        try:
+            result = self._resolver.resolve(self._rows)
+        except Exception:  # noqa: BLE001 — résolution best-effort, non bloquante
+            return
+        self.resolved.emit(result)
+
+
+class _PropsWorker(QThread):
+    """Résout maturité + verrouillage d'un lot de lignes hors thread UI."""
+
+    resolved = pyqtSignal(dict)  # {row.key: PropInfo}
+
+    def __init__(
+        self,
+        resolver: PropertiesResolver,
+        rows: list[ObjectRow],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._resolver = resolver
+        self._rows = rows
+
+    def run(self) -> None:  # noqa: D102
+        try:
+            result = self._resolver.resolve(self._rows)
+        except Exception:  # noqa: BLE001 — résolution best-effort, non bloquante
+            return
+        self.resolved.emit(result)
+
+
 class SearchPanel(QWidget):
     """Panneau F3 : filtres + tableau à cases (lecture seule)."""
 
@@ -115,6 +184,14 @@ class SearchPanel(QWidget):
         self._next_start: str | None = None
         self._search_worker: _SearchWorker | None = None
         self._cs_worker: _CollabspacesWorker | None = None
+        # Résolveur de taille réel (endpoint /files) — cache partagé entre pages.
+        self._size_resolver: SizeResolver = ModelerFilesSizeResolver(self._client)
+        self._size_workers: list[_SizeWorker] = []
+        # Résolveur maturité + verrouillage (read_attributes par lot) — cache partagé.
+        self._props_resolver: PropertiesResolver = ReadAttributesPropertiesResolver(
+            self._client
+        )
+        self._props_workers: list[_PropsWorker] = []
 
         root = QVBoxLayout(self)
         root.addWidget(self._build_filters())
@@ -132,31 +209,29 @@ class SearchPanel(QWidget):
 
         self._query = QLineEdit("*")
         self._query.setPlaceholderText("Texte libre ou UQL (* = tout)")
-        self._types = QLineEdit()
-        self._types.setPlaceholderText("Types séparés par des virgules (ex. VPMReference, Document)")
-        self._owner = QLineEdit()
-        self._owner.setPlaceholderText("Login propriétaire (optionnel)")
-        self._maturity = QLineEdit()
-        self._maturity.setPlaceholderText("Statut/maturité (ex. In Work, Released)")
+        # Combos à cocher (multi-sélection). Type/Propriétaire s'enrichissent au
+        # fil des résultats ; Maturité est pré-remplie ; Collabspace est chargé
+        # depuis le serveur. « Tous » (vide) = pas de filtre.
+        self._types = CheckableComboBox("Tous les types")
+        self._owners = CheckableComboBox("Tous les propriétaires")
+        self._maturities = CheckableComboBox("Toutes les maturités")
+        self._maturities.set_items(_DEFAULT_MATURITIES)
+        self._collabspaces = CheckableComboBox("Tous les espaces")
         self._modified_after = QLineEdit()
         self._modified_after.setPlaceholderText("Modifié après — ISO (2026-01-01)")
         self._modified_before = QLineEdit()
         self._modified_before.setPlaceholderText("Modifié avant — ISO (2026-12-31)")
-        self._collabspace = QComboBox()
-        self._collabspace.setEditable(True)
-        self._collabspace.addItem("")  # vide = pas de filtre collabspace
-        self._collabspace.lineEdit().setPlaceholderText("Collaborative space (optionnel)")
         self._page_size = QSpinBox()
         self._page_size.setRange(1, 500)
         self._page_size.setValue(50)
 
         form.addRow("Texte", self._query)
         form.addRow("Types", self._types)
-        form.addRow("Propriétaire", self._owner)
-        form.addRow("Maturité", self._maturity)
+        form.addRow("Propriétaires", self._owners)
+        form.addRow("Maturités", self._maturities)
         form.addRow("Modifié après", self._modified_after)
         form.addRow("Modifié avant", self._modified_before)
-        form.addRow("Collabspace", self._collabspace)
+        form.addRow("Collabspaces", self._collabspaces)
         form.addRow("Taille de page", self._page_size)
 
         actions = QHBoxLayout()
@@ -181,9 +256,17 @@ class SearchPanel(QWidget):
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self._table.itemChanged.connect(self._on_item_changed)
+
         header = self._table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Titre
+        # Toutes les colonnes redimensionnables librement (drag) avec largeur
+        # initiale fixe. On évite le mode Stretch (qui rend le drag des
+        # colonnes voisines erratique) ; un scroll horizontal apparaît au besoin.
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self._table.setColumnWidth(0, 30)
+        for idx, width in enumerate(_COLUMN_WIDTHS, start=1):
+            self._table.setColumnWidth(idx, width)
         return self._table
 
     def _build_footer(self) -> QHBoxLayout:
@@ -212,15 +295,14 @@ class SearchPanel(QWidget):
     # --- Filtres ---
 
     def _current_filters(self) -> SearchFilters:
-        types_raw = [t.strip() for t in self._types.text().split(",") if t.strip()]
         return SearchFilters(
             query=self._query.text().strip() or "*",
-            types=types_raw or None,
-            owner=self._owner.text().strip() or None,
-            maturity=self._maturity.text().strip() or None,
+            types=self._types.checked_values() or None,
+            owners=self._owners.checked_values() or None,
+            maturities=self._maturities.checked_values() or None,
+            collabspaces=self._collabspaces.checked_values() or None,
             modified_after=self._modified_after.text().strip() or None,
             modified_before=self._modified_before.text().strip() or None,
-            collabspace=self._collabspace.currentText().strip() or None,
             page_size=self._page_size.value(),
         )
 
@@ -263,9 +345,84 @@ class SearchPanel(QWidget):
         self._next_start = page.next_start
         self._more_btn.setEnabled(bool(page.next_start))
         self._update_status(page)
+        self._accumulate_facets(page.rows)
+        self._resolve_sizes(page.rows)
+        self._resolve_props(page.rows)
+
+    def _accumulate_facets(self, rows: list[ObjectRow]) -> None:
+        """Enrichit les combos Type/Propriétaire/Maturité avec les valeurs vues."""
+        self._types.add_values(sorted({r.type for r in rows if r.type}))
+        self._owners.add_values(sorted({r.owner for r in rows if r.owner}))
+        self._maturities.add_values(sorted({r.status for r in rows if r.status}))
 
     def _on_search_failed(self, message: str) -> None:
         self._set_status(f"ÉCHEC — {message}", error=True)
+
+    # --- Résolution de taille (colonne « Taille ») ---
+
+    def _resolve_sizes(self, rows: list[ObjectRow]) -> None:
+        """Lance la résolution de taille des lignes ``rows`` hors thread UI."""
+        targets = [r for r in rows if r.physical_id]
+        if not targets:
+            return
+        worker = _SizeWorker(self._size_resolver, targets, self)
+        worker.resolved.connect(self._on_sizes_resolved)
+        worker.finished.connect(lambda: self._size_workers.remove(worker)
+                                if worker in self._size_workers else None)
+        self._size_workers.append(worker)
+        worker.start()
+
+    def _on_sizes_resolved(self, sizes: dict[str, int | None]) -> None:
+        """Met à jour la colonne « Taille » pour les clés résolues."""
+        size_col = len(_COLUMNS)  # dernière colonne (Taille), après la case (col 0)
+        self._table.blockSignals(True)
+        for r, row in enumerate(self._rows):
+            if r >= self._table.rowCount():
+                break
+            if row.key in sizes:
+                item = self._table.item(r, size_col)
+                if item is not None:
+                    item.setText(format_size(sizes[row.key]))
+        self._table.blockSignals(False)
+
+    # --- Résolution maturité + verrouillage (read_attributes par lot) ---
+
+    def _resolve_props(self, rows: list[ObjectRow]) -> None:
+        """Lance la résolution maturité + verrouillage hors thread UI."""
+        targets = [r for r in rows if r.physical_id]
+        if not targets:
+            return
+        worker = _PropsWorker(self._props_resolver, targets, self)
+        worker.resolved.connect(self._on_props_resolved)
+        worker.finished.connect(lambda: self._props_workers.remove(worker)
+                                if worker in self._props_workers else None)
+        self._props_workers.append(worker)
+        worker.start()
+
+    def _on_props_resolved(self, props: dict[str, PropInfo]) -> None:
+        """Remplit les colonnes « Maturité » et « Verrouillage »."""
+        mat_col = _COLUMNS.index("Maturité") + 1   # +1 : case à cocher en col 0
+        lock_col = _COLUMNS.index("Verrouillage") + 1
+        new_maturities: set[str] = set()
+        self._table.blockSignals(True)
+        for r, row in enumerate(self._rows):
+            if r >= self._table.rowCount():
+                break
+            info = props.get(row.key)
+            if info is None:
+                continue
+            if info.maturity:
+                item = self._table.item(r, mat_col)
+                # ne remplace que si la recherche n'avait rien fourni (vide ou « … »)
+                if item is not None and item.text().strip() in ("", "…"):
+                    item.setText(info.maturity)
+                new_maturities.add(info.maturity)
+            lock_item = self._table.item(r, lock_col)
+            if lock_item is not None:
+                lock_item.setText(format_lock(info.lock))
+        self._table.blockSignals(False)
+        if new_maturities:
+            self._maturities.add_values(sorted(new_maturities))
 
     # --- Tableau ---
 
@@ -291,7 +448,8 @@ class SearchPanel(QWidget):
                 row.identifier or "",
                 row.title or "",
                 row.revision or "",
-                row.status or "",
+                row.status or "…",      # Maturité (ds6w:status ; sinon résolue)
+                "…",                    # Verrouillage — résolu en tâche de fond
                 row.owner or "",
                 row.modified or "",
                 format_size(row.size_bytes),
@@ -337,13 +495,7 @@ class SearchPanel(QWidget):
         self._cs_worker.start()
 
     def _on_collabspaces(self, names: list[str]) -> None:
-        current = self._collabspace.currentText()
-        self._collabspace.blockSignals(True)
-        self._collabspace.clear()
-        self._collabspace.addItem("")
-        self._collabspace.addItems(names)
-        self._collabspace.setCurrentText(current)
-        self._collabspace.blockSignals(False)
+        self._collabspaces.set_items(names)
 
     # --- Statut ---
 

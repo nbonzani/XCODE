@@ -1,0 +1,59 @@
+{
+  "success": true,
+  "statusCode": 200,
+  "csrf": {
+    "name": "ENO_CSRF_TOKEN",
+    "value": "<REDACTED>"
+  },
+  "items": 1,
+  "data": [
+    {
+      "id": "56A5898500000BFC6A26DC9F0001DBEC",
+      "type": "Document",
+      "identifier": "56A5898500000BFC6A26DC9F0001DBEC",
+      "source": "https://3dexperience2025.univ-lorraine.fr:443/3dspace",
+      "relativePath": "/resources/v1/modeler/documents/56A5898500000BFC6A26DC9F0001DBEC",
+      "relId": "56A5898500000BFC6A26DC9F0001DBF8",
+      "cestamp": "56A5898500000BFC6A26DC9F0001DBEA",
+      "dataelements": {
+        "title": "Skateboard -In Work -1.1 (1).3dxml",
+        "name": "221780931743603",
+        "comments": "",
+        "locker": "",
+        "fileType": " ",
+        "dimension": "",
+        "length": "0.0",
+        "revision": "1",
+        "originated": "2026-06-08T15:15:43.000Z",
+        "modified": "2026-06-08T15:15:43.000Z",
+        "fileSize": "133575",
+        "fileChecksum": "{MD5}d6283f1fe52c400eab80c11f79daeb3f",
+        "format": "generic",
+        "image": "https://3dexperience2025.univ-lorraine.fr:443/3dspace/snresources/images/icons/large/I_CDM_Document108x144.png"
+      },
+      "relateddata": {
+        "ownerInfo": [
+          {
+            "id": "56A589850000394C6A1D9576000000EA",
+            "type": "Person",
+            "cestamp": "56A58985000034446A1D95E50000000E",
+            "dataelements": {
+              "name": "herry25u",
+              "firstname": "Michael",
+              "lastname": "Herry"
+            },
+            "children": []
+          }
+        ],
+        "lockerInfo": [
+          {
+            "children": []
+          }
+        ]
+      },
+      "children": []
+    }
+  ],
+  "masks": [],
+  "definitions": []
+}

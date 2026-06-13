@@ -1,21 +1,22 @@
-"""F3 — résolution de la taille de fichier d'un objet (jalon 2, architecture).
+"""F3 — résolution de la taille de fichier d'un objet (jalon 3).
 
-⚠️ **Contrat REST non capturé.** La taille n'est pas un prédicat de recherche
-et n'est PAS retournée par ``search_advanced``. Elle doit être récupérée via les
-métadonnées de fichier physique (FCS / ``GET .../modeler/documents/{id}/files``).
-À ce jour cet endpoint n'a été capturé qu'à **vide** (aucun fichier attaché) :
-le format exact d'un fichier présent (clé JSON de la taille) reste **inconnu**.
-Tant qu'une capture HAR (cf. skill ``har-capture-3dx``) n'a pas confirmé le
-contrat, on n'**invente pas** de clé : le résolveur par défaut renvoie ``None``.
+La taille n'est pas un prédicat de recherche et n'est PAS retournée par
+``search_advanced``. Elle est récupérée via les métadonnées de fichier physique
+``GET /resources/v1/modeler/documents/{id}/files`` : chaque entrée ``data[]`` est
+un fichier dont ``dataelements.fileSize`` porte la taille en octets (chaîne).
 
-Ce module fournit donc :
+Contrat **capturé live** le 2026-06-13 contre le tenant Polytech R2026x
+(cf. ``docs/captures/size-files/analysis.md``). L'endpoint typé côté moteur est
+``threedx_mcp.client.endpoints.documents.list_document_files``.
+
+Ce module fournit :
 - :class:`SizeResolver` — protocole enfichable (un résolveur = ``resolve(rows)``).
 - :class:`NullSizeResolver` — défaut neutre : laisse toutes les tailles à ``None``.
-- :class:`ModelerFilesSizeResolver` — emplacement câblé sur l'endpoint connu,
-  mais **désactivé** (lève :class:`SizeContractNotCaptured`) jusqu'à la capture.
+- :class:`ModelerFilesSizeResolver` — résolveur réel câblé sur l'endpoint
+  ``files`` (appel par lot + cache, somme des fichiers par Document).
 
-L'UI affiche « — » pour une taille ``None`` ; la colonne existe pour être
-alimentée sans refonte une fois le contrat validé (jalon 3).
+L'UI affiche « — » pour une taille ``None`` (objet sans fichier, type non
+documentaire, ou résolution non encore demandée).
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from threedx_cleaner.core.document_query import ObjectRow
 
 
 class SizeContractNotCaptured(NotImplementedError):
-    """Levée par un résolveur dont le contrat REST n'est pas encore capturé."""
+    """Conservée pour compat ascendante (contrat désormais capturé, plus levée)."""
 
 
 class SizeResolver(Protocol):
@@ -53,30 +54,60 @@ class NullSizeResolver:
 
 
 class ModelerFilesSizeResolver:
-    """Résolveur FCS (``.../documents/{id}/files``) — **STUB, non activé**.
+    """Résolveur réel : taille = somme des fichiers physiques d'un Document.
 
-    Emplacement réservé pour le câblage réel une fois le contrat capturé. Ne
-    PAS deviner la clé de taille : tant que la capture HAR n'a pas confirmé le
-    format d'un fichier présent, ``resolve`` lève
-    :class:`SizeContractNotCaptured` plutôt que de retourner une valeur fausse.
+    Appelle ``documents.list_document_files`` (endpoint
+    ``GET .../documents/{id}/files``) pour chaque ligne *documentaire* du lot,
+    somme les ``size_bytes`` de ses fichiers, et **met en cache** le résultat
+    par clé de ligne pour ne pas refaire l'appel entre deux ``resolve``.
 
-    Étapes d'activation (jalon 3) :
-      1. capturer ``GET /resources/v1/modeler/documents/{id}/files`` sur un
-         Document AVEC fichier (skill ``har-capture-3dx``) ;
-      2. identifier la clé JSON exacte de la taille dans ``data[].dataelements`` ;
-      3. implémenter l'appel par lot + cache ici ;
-      4. router l'UI de :class:`NullSizeResolver` vers ce résolveur.
+    Tolérance aux erreurs : un objet sans fichier (``data[]`` vide), d'un type
+    non documentaire, ou dont l'appel échoue → ``None`` (jamais d'exception
+    propagée). Seules les lignes dont le type ressemble à un Document sont
+    sondées, pour éviter des appels inutiles sur des Parts/Représentations.
     """
 
     def __init__(self, client: object) -> None:
         self._client = client
+        self._cache: dict[str, int | None] = {}
+
+    @staticmethod
+    def _is_document(row: ObjectRow) -> bool:
+        """Heuristique : ne sonder que les lignes au type documentaire."""
+        t = (row.type or "").lower()
+        # Type vide → on tente (rare ; l'appel échouera proprement sinon).
+        return not t or "document" in t or "drawing" in t
+
+    def _resolve_one(self, physical_id: str) -> int | None:
+        """Taille totale (octets) des fichiers d'un Document, ou ``None``."""
+        from threedx_mcp.client.endpoints import documents
+
+        try:
+            files = documents.list_document_files(self._client, physical_id)
+        except Exception:  # noqa: BLE001 — résolution best-effort, jamais bloquante
+            return None
+        sizes = [f.size_bytes for f in files if f.size_bytes is not None]
+        if not sizes:
+            return None
+        return sum(sizes)
 
     def resolve(self, rows: list[ObjectRow]) -> dict[str, int | None]:
-        raise SizeContractNotCaptured(
-            "Contrat REST de taille de fichier non capturé : exécuter la capture "
-            "HAR (skill har-capture-3dx) sur un Document avec fichier avant "
-            "d'activer ModelerFilesSizeResolver."
-        )
+        out: dict[str, int | None] = {}
+        for row in rows:
+            key = row.key
+            if not key:
+                continue
+            if key in self._cache:
+                out[key] = self._cache[key]
+                continue
+            if not row.physical_id or not self._is_document(row):
+                self._cache[key] = None
+                out[key] = None
+                continue
+            size = self._resolve_one(row.physical_id)
+            self._cache[key] = size
+            out[key] = size
+        return out
 
 
 def format_size(size_bytes: int | None) -> str:

@@ -184,12 +184,35 @@ on-prem/cloud via `deployment_mode` (variantes `*_cloud`). Erreurs partielles
 erreurs, sans physical_id). ⚠️ Pas encore branché sur l'UI ; aucune confirmation
 ni suppression n'existe (réservé J3/J4).
 
+## 10bis. Enrichissements F3 (post-J2, lecture seule) — code fait
+
+- **Taille** : contrat `/files` capturé live (clé `data[].dataelements.fileSize`,
+  octets en chaîne, sommée par Document). Moteur : `documents.list_document_files`
+  + `DocumentFile` (repo 3dx-mcp). Cleaner : `ModelerFilesSizeResolver` **activé**
+  (cache + tolérant), worker Qt `_SizeWorker`. Capture : `docs/captures/size-files/`,
+  probe `scripts/probe_files_size.py`.
+- **Maturité + Verrouillage** : `core/properties_resolver.py` (remplace l'éphémère
+  `lock_resolver`) — `ReadAttributesPropertiesResolver` via `read_attributes`
+  (1 appel/page) : maturité ← `basicData.current` (fiable ; la recherche fédérée
+  ne remonte pas `ds6w:status` sur le tenant), verrouillage ← sondage défensif
+  `reserved`/`reservedby`/`locker` (⚠️ présence selon tenant → « — » si absent ;
+  sinon basculer sur lecture *stack* `getAllValidObjFromStack`).
+- **Filtres multi-sélection** : `ui/checkable_combo.py` (CheckableComboBox) pour
+  Types / Propriétaires / Maturités / Collabspaces. `SearchFilters` accepte des
+  listes → groupes `OR` combinés en `AND` (`_or_clause`). Types/Propriétaires
+  s'enrichissent par facettes des résultats ; Maturités pré-remplie ; Collabspaces
+  chargés du serveur.
+- **Tableau** : colonnes Type/Identifiant/Titre/Rév/**Maturité**/**Verrouillage**/
+  Propriétaire/Modifié/**Taille** ; redimensionnement corrigé (toutes colonnes
+  `Interactive` + largeurs initiales + case figée, plus de `Stretch` erratique).
+- `3dx-cleaner.bat` : lanceur racine (venv interne, console si erreur).
+- **Vérifié** : `pytest -q` → 72/72. **NON vérifié live** : remplissage réel
+  verrouillage (champ tenant), pertinence prédicat collabspace.
+
 ## 10. Prochaine étape — JALON 3 (zone d'écriture, à superviser)
 
 Cf. `docs/prompt-session-jalon3.md`. **Contient les premières opérations
 destructives — à valider explicitement.** Reste à faire :
-- **Capture HAR taille** (skill `har-capture-3dx`) sur un Document AVEC fichier →
-  contrat de `GET .../documents/{id}/files` → activer `ModelerFilesSizeResolver`.
 - **F4 normalize** (`core/normalize.py`) : unreserve + demote In Work, en
   **dry-run/plan par défaut**, exécution gardée par confirmation UI.
 - **Exécuteur batch** (`core/executor.py`) : worker Qt + pool borné, progression,

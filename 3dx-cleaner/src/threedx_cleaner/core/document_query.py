@@ -7,8 +7,8 @@ la pagination (un *batch* à la fois) et l'énumération exhaustive bornée.
 La **taille de fichier** n'est PAS un prédicat de recherche et n'est pas
 retournée par ``search_advanced`` : elle est laissée à ``None`` ici et résolue
 séparément, à la demande, par un :class:`~threedx_cleaner.core.size_resolver.SizeResolver`
-(cf. ce module). Tant que le contrat REST FCS n'est pas capturé (cf. skill
-``har-capture-3dx``), le résolveur par défaut renvoie ``None``.
+(contrat REST ``/files`` capturé — cf. ``size_resolver`` et
+``docs/captures/size-files/analysis.md``).
 """
 
 from __future__ import annotations
@@ -52,24 +52,44 @@ class ObjectRow:
         return self.physical_id or self.identifier or ""
 
 
+def _quote(value: str) -> str:
+    """Échappe une valeur pour une clause UQL entre guillemets."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _or_clause(predicate: str, values: list[str] | None) -> list[str]:
+    """Construit ``[('[pred]:"a" OR [pred]:"b")')]`` pour une multi-sélection."""
+    vals = [v for v in (values or []) if v]
+    if not vals:
+        return []
+    terms = " OR ".join(f'[{predicate}]:"{_quote(v)}"' for v in vals)
+    return [f"({terms})" if len(vals) > 1 else terms]
+
+
 @dataclass(frozen=True)
 class SearchFilters:
-    """Critères de recherche F3 (tous optionnels, combinés en AND côté moteur)."""
+    """Critères de recherche F3 (tous optionnels, combinés en AND côté moteur).
+
+    ``types`` / ``owners`` / ``maturities`` / ``collabspaces`` acceptent
+    **plusieurs valeurs** (multi-sélection) : chacune est étendue en groupe
+    ``OR`` ; les groupes sont combinés en ``AND``.
+    """
 
     query: str = "*"
     types: list[str] | None = None
-    owner: str | None = None
-    maturity: str | None = None
+    owners: list[str] | None = None
+    maturities: list[str] | None = None
+    collabspaces: list[str] | None = None
     modified_after: str | None = None
     modified_before: str | None = None
-    collabspace: str | None = None
     page_size: int = 50
 
     def _extra_clauses(self) -> list[str] | None:
-        if not self.collabspace:
-            return None
-        value = self.collabspace.replace("\\", "\\\\").replace('"', '\\"')
-        return [f'[{_COLLABSPACE_PREDICATE}]:"{value}"']
+        clauses: list[str] = []
+        clauses += _or_clause("owner", self.owners)
+        clauses += _or_clause("ds6w:status", self.maturities)
+        clauses += _or_clause(_COLLABSPACE_PREDICATE, self.collabspaces)
+        return clauses or None
 
 
 @dataclass(frozen=True)
@@ -119,12 +139,14 @@ def search_page(
     Raises:
         threedx_mcp.client.errors.ThreeDxError: erreur d'auth/transport/métier.
     """
+    # owner / maturity / collabspace multi-valeurs passent par extra_clauses
+    # (groupes OR) ; types reste géré nativement par search_advanced.
     result = search.search_advanced(
         client,
         query=filters.query or "*",
         types=filters.types,
-        owner=filters.owner,
-        maturity=filters.maturity,
+        owner=None,
+        maturity=None,
         modified_after=filters.modified_after,
         modified_before=filters.modified_before,
         extra_clauses=filters._extra_clauses(),

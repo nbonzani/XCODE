@@ -67,8 +67,8 @@ def test_filters_passed_through(captured_calls) -> None:
     filters = SearchFilters(
         query="suspension",
         types=["Document"],
-        owner="nb",
-        maturity="Released",
+        owners=["nb"],
+        maturities=["Released"],
         modified_after="2026-01-01",
         modified_before="2026-12-31",
         page_size=10,
@@ -77,20 +77,32 @@ def test_filters_passed_through(captured_calls) -> None:
     kw = captured_calls[-1]
     assert kw["query"] == "suspension"
     assert kw["types"] == ["Document"]
-    assert kw["owner"] == "nb"
-    assert kw["maturity"] == "Released"
+    # owner / maturity multi-valeurs passent par extra_clauses (owner natif = None)
+    assert kw["owner"] is None
+    assert kw["maturity"] is None
     assert kw["limit"] == 10
-    assert kw["extra_clauses"] is None
+    assert kw["extra_clauses"] == ['[owner]:"nb"', '[ds6w:status]:"Released"']
 
 
-def test_collabspace_builds_extra_clause(captured_calls) -> None:
-    document_query.search_page(object(), SearchFilters(collabspace="PersoNB"))
+def test_single_value_no_parentheses(captured_calls) -> None:
+    document_query.search_page(object(), SearchFilters(collabspaces=["PersoNB"]))
     kw = captured_calls[-1]
     assert kw["extra_clauses"] == ['[ds6w:collabspace]:"PersoNB"']
 
 
+def test_multi_values_or_group(captured_calls) -> None:
+    document_query.search_page(
+        object(), SearchFilters(owners=["a", "b"], maturities=["In Work", "Released"])
+    )
+    kw = captured_calls[-1]
+    assert kw["extra_clauses"] == [
+        '([owner]:"a" OR [owner]:"b")',
+        '([ds6w:status]:"In Work" OR [ds6w:status]:"Released")',
+    ]
+
+
 def test_collabspace_escapes_quotes(captured_calls) -> None:
-    document_query.search_page(object(), SearchFilters(collabspace='a"b'))
+    document_query.search_page(object(), SearchFilters(collabspaces=['a"b']))
     kw = captured_calls[-1]
     assert kw["extra_clauses"] == ['[ds6w:collabspace]:"a\\"b"']
 
