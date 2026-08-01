@@ -11,7 +11,8 @@ if (!isset($_SERVER['HTTP_X_DEPLOY_TOKEN']) ||
     exit;
 }
 
-$allowed = ['index.php', 'api.php', 'log.php', 'db.php', 'purge.php', 'config.php'];
+$allowed = ['index.php', 'api.php', 'log.php', 'db.php', 'purge.php', 'config.php',
+            'env.php', 'mailer.php', 'watchdog.php', '.env'];
 $filename = $_GET['file'] ?? '';
 if (!in_array($filename, $allowed, true)) {
     http_response_code(400);

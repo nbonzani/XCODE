@@ -81,6 +81,41 @@ Le script Shelly v2.1 enverra automatiquement :
 | reason        | TEXT    | Motif lisible de l'évènement                  |
 | raw           | TEXT    | Payload JSON brut reçu                        |
 
+## Watchdog (alerte mail si le Shelly ne repond plus)
+
+`watchdog.php` verifie l'ecart entre `now()` et la derniere reception en base
+(`MAX(received_at)`). S'il depasse `WATCHDOG_THRESHOLD_SEC` (15 min par
+defaut - le Shelly envoie un heartbeat toutes les 5 min), un mail d'alerte
+est envoye une seule fois (pas de spam), puis un mail "reprise" des que les
+donnees reviennent.
+
+### 1. Configurer `.env`
+
+Voir `.env.example`. Necessite un compte Gmail dedie avec un
+**mot de passe d'application** (Compte Google -> Securite -> Validation en
+2 etapes -> Mots de passe des applications).
+
+### 2. Tester manuellement
+
+```bash
+curl "http://192.168.1.99/pompe/watchdog.php?token=VOTRE_TOKEN&test=1"
+```
+
+→ doit repondre `{"ok":true,"error":null}` et envoyer un mail de test.
+
+### 3. Planifier la verification (DSM Task Scheduler)
+
+DSM → Panneau de configuration → Planificateur de taches → Creer →
+**Tache declenchee** → Script defini par l'utilisateur.
+
+- Planification : toutes les 5 minutes (Parametres de tache → recurrence).
+- Utilisateur : `http` (ou un compte avec droits lecture sur le dossier).
+- Script :
+
+```bash
+curl -s "http://localhost/pompe/watchdog.php?token=VOTRE_TOKEN" >> /volume1/web/pompe/watchdog.log
+```
+
 ## Maintenance
 
 - La base grossit d'environ **290 lignes/jour** (288 heartbeats + évènements).
