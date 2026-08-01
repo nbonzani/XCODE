@@ -3,6 +3,7 @@
 // Accepte un POST JSON, stocke en SQLite, répond en JSON.
 
 header('Content-Type: application/json; charset=utf-8');
+date_default_timezone_set('Europe/Paris');
 require_once __DIR__ . '/db.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -24,9 +25,9 @@ try {
     $pdo = db();
     $stmt = $pdo->prepare("
         INSERT INTO events
-            (ts, received_at, type, pump_on, grid_w, grid_avg_w, pv_w, mode, daily_sec, reason, raw)
+            (ts, received_at, type, pump_on, grid_w, grid_avg_w, pv_w, mode, daily_sec, reason, pv_wh_5m, pump_grid_wh_5m, raw)
         VALUES
-            (:ts, :rx, :type, :pump_on, :grid, :gridavg, :pv, :mode, :daily, :reason, :raw)
+            (:ts, :rx, :type, :pump_on, :grid, :gridavg, :pv, :mode, :daily, :reason, :pv5m, :pgrid5m, :raw)
     ");
     $stmt->execute([
         ':ts'      => isset($data['ts']) ? intval($data['ts']) : time(),
@@ -39,6 +40,8 @@ try {
         ':mode'    => isset($data['mode'])       ? substr((string)$data['mode'], 0, 16) : null,
         ':daily'   => isset($data['daily_sec'])  ? intval($data['daily_sec'])    : null,
         ':reason'  => isset($data['reason'])     ? substr((string)$data['reason'], 0, 200) : null,
+        ':pv5m'    => isset($data['pv_wh_5m'])       ? floatval($data['pv_wh_5m'])       : null,
+        ':pgrid5m' => isset($data['pump_grid_wh_5m']) ? floatval($data['pump_grid_wh_5m']) : null,
         ':raw'     => $raw,
     ]);
     echo json_encode(['ok' => true, 'id' => intval($pdo->lastInsertId())]);

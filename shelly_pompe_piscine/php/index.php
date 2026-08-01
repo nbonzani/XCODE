@@ -1,4 +1,8 @@
-<?php header('Content-Type: text/html; charset=utf-8'); ?><!doctype html>
+<?php
+header('Content-Type: text/html; charset=utf-8');
+require_once __DIR__ . '/env.php';
+$deployToken = env('DEPLOY_TOKEN', '');
+?><!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -15,7 +19,7 @@
   .subtitle { opacity: 0.5; font-size: 12px; margin-bottom: 20px; }
   .cards {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
     gap: 12px; margin-bottom: 25px;
   }
   .card {
@@ -57,6 +61,45 @@
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   .bar { display: inline-block; height: 10px; background: #4fc3f7; border-radius: 2px; vertical-align: middle; }
   .err { color: #f44336; padding: 15px; background: #2a1515; border-radius: 8px; }
+  .purge-box {
+    margin-top: 32px; padding: 16px 20px;
+    background: #1b2533; border-radius: 8px;
+    border-left: 4px solid #f44336;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .purge-box label { font-size: 12px; opacity: 0.7; }
+  .purge-box input[type=date] {
+    background: #0f1720; color: #e7ebf0; border: 1px solid #4fc3f7;
+    border-radius: 4px; padding: 5px 8px; font-size: 13px;
+  }
+  .purge-box button {
+    background: #f44336; color: #fff; border: none;
+    border-radius: 4px; padding: 6px 14px; font-size: 13px;
+    cursor: pointer; font-weight: 600;
+  }
+  .purge-box button:hover { background: #d32f2f; }
+  .purge-msg { font-size: 12px; margin-left: 4px; }
+  .settings-box {
+    margin-top: 24px; padding: 16px 20px;
+    background: #1b2533; border-radius: 8px;
+    border-left: 4px solid #4fc3f7;
+  }
+  .settings-box h2 { margin: 0 0 14px; }
+  .seuil-table { width: auto; background: transparent; border-radius: 0; }
+  .seuil-table th, .seuil-table td { padding: 5px 10px; font-size: 13px; border-bottom: 1px solid #283244; }
+  .seuil-table th { background: transparent; opacity: 0.7; }
+  .seuil-table input[type=number] {
+    width: 90px; background: #0f1720; color: #e7ebf0;
+    border: 1px solid #4fc3f7; border-radius: 4px; padding: 4px 7px; font-size: 13px;
+  }
+  .seuil-table .unit { opacity: 0.5; font-size: 11px; padding-left: 3px; }
+  .btn-save {
+    margin-top: 14px; background: #4fc3f7; color: #0f1720;
+    border: none; border-radius: 4px; padding: 7px 18px;
+    font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  .btn-save:hover { background: #29b6f6; }
+  .settings-msg { font-size: 12px; margin-left: 10px; }
 </style>
 </head>
 <body>
@@ -89,11 +132,120 @@ function num(v, suffix) {
   if (v === null || v === undefined) return '—';
   return Math.round(v) + (suffix || '');
 }
+function fmtWh(wh) {
+  if (wh === null || wh === undefined || wh === '') return '—';
+  const v = parseFloat(wh);
+  if (isNaN(v)) return '—';
+  if (v >= 1000) return (v / 1000).toFixed(2) + ' kWh';
+  return Math.round(v) + ' Wh';
+}
+
+// ---- Paramètres (seuils) ----
+let _cfg = {};
+
+function renderSettings(cfg) {
+  _cfg = cfg || {};
+  const seasons = [
+    { key: 'haute', label: 'HAUTE (juin–août)' },
+    { key: 'mi',    label: 'MI (mars–mai, sept–oct)' },
+    { key: 'basse', label: 'BASSE (nov–fév)' },
+  ];
+  const rows = seasons.map(s => `
+    <tr>
+      <td>${s.label}</td>
+      <td>
+        <input type="number" id="mini_${s.key}"
+               value="${cfg['seuil_mini_' + s.key] !== undefined ? cfg['seuil_mini_' + s.key] : ''}">
+        <span class="unit">W</span>
+      </td>
+      <td>
+        <input type="number" id="maxi_${s.key}"
+               value="${cfg['seuil_maxi_' + s.key] !== undefined ? cfg['seuil_maxi_' + s.key] : ''}">
+        <span class="unit">W</span>
+      </td>
+      <td>
+        <input type="number" id="quota_mini_${s.key}" min="0" max="24" step="0.5"
+               value="${cfg['quota_mini_' + s.key] !== undefined ? cfg['quota_mini_' + s.key] : ''}">
+        <span class="unit">h</span>
+      </td>
+      <td>
+        <input type="number" id="quota_max_${s.key}" min="0" max="24" step="0.5"
+               value="${cfg['quota_max_' + s.key] !== undefined ? cfg['quota_max_' + s.key] : ''}">
+        <span class="unit">h</span>
+      </td>
+    </tr>
+  `).join('');
+
+  document.getElementById('settingsBody').innerHTML = rows;
+}
+
+async function saveSettings() {
+  const msg = document.getElementById('settingsMsg');
+  const seasons = ['haute', 'mi', 'basse'];
+  const data = {};
+  for (const s of seasons) {
+    const mini = document.getElementById('mini_' + s);
+    const maxi = document.getElementById('maxi_' + s);
+    const qm   = document.getElementById('quota_mini_' + s);
+    const qx   = document.getElementById('quota_max_'  + s);
+    if (!mini || !maxi || !qm || !qx) continue;
+    data['seuil_mini_' + s]  = parseInt(mini.value, 10);
+    data['seuil_maxi_' + s]  = parseInt(maxi.value, 10);
+    data['quota_mini_' + s]  = parseFloat(qm.value);
+    data['quota_max_'  + s]  = parseFloat(qx.value);
+  }
+
+  // Validation
+  for (const s of seasons) {
+    if (data['seuil_mini_' + s] >= data['seuil_maxi_' + s]) {
+      msg.textContent = '⚠️ Seuil mini doit être < seuil maxi pour ' + s.toUpperCase();
+      msg.style.color = '#ffb74d';
+      return;
+    }
+    if (data['quota_mini_' + s] < 0 || data['quota_mini_' + s] > 24) {
+      msg.textContent = '⚠️ Quota mini invalide pour ' + s.toUpperCase() + ' (0–24 h)';
+      msg.style.color = '#ffb74d';
+      return;
+    }
+    if (data['quota_max_' + s] <= 0 || data['quota_max_' + s] > 24 ||
+        data['quota_max_' + s] < data['quota_mini_' + s]) {
+      msg.textContent = '⚠️ Quota max invalide pour ' + s.toUpperCase() + ' (doit être > quota mini)';
+      msg.style.color = '#ffb74d';
+      return;
+    }
+  }
+  msg.textContent = '…'; msg.style.color = '#e7ebf0';
+  try {
+    const r = await fetch('config.php', {
+      method: 'POST',
+      headers: { 'X-Deploy-Token': '<?= htmlspecialchars($deployToken, ENT_QUOTES) ?>', 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msg.textContent = '✅ ' + d.saved + ' valeurs sauvegardées (prise en compte au prochain cycle Shelly)';
+      msg.style.color = '#4caf50';
+    } else {
+      msg.textContent = '❌ ' + (d.error || 'erreur');
+      msg.style.color = '#f44336';
+    }
+  } catch(e) {
+    msg.textContent = '❌ ' + e.message;
+    msg.style.color = '#f44336';
+  }
+}
 
 async function refresh() {
   try {
     const r = await fetch('api.php?_=' + Date.now());
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    if (!r.ok) {
+      let detail = 'HTTP ' + r.status;
+      try {
+        const body = await r.json();
+        if (body && body.error) detail += ' — ' + body.error;
+      } catch (_) {}
+      throw new Error(detail);
+    }
     const d = await r.json();
     render(d);
   } catch (e) {
@@ -117,6 +269,8 @@ function render(d) {
       <td>${fmtDay(row.day)}</td>
       <td class="num">${fmtDur(s)}</td>
       <td><span class="bar" style="width:${w}%"></span></td>
+      <td class="num">☀️ ${fmtWh(row.pv_wh)}</td>
+      <td class="num">💶 ${fmtWh(row.pump_grid_wh)}</td>
     </tr>`;
   }).join('');
 
@@ -150,7 +304,15 @@ function render(d) {
     <div class="cards">
       <div class="card ${stateClass}">
         <div class="label">État pompe</div>
-        <div class="value">${stateLabel}</div>
+        <div class="value">${stateLabel}
+          <button id="pumpBtn"
+            onclick="setPump(${on ? 'false' : 'true'})"
+            style="margin-left:10px;padding:3px 10px;font-size:13px;font-weight:700;
+                   border:none;border-radius:4px;cursor:pointer;vertical-align:middle;
+                   background:${on ? '#f44336' : '#4caf50'};color:#fff;">
+            ${on ? '⏹ OFF' : '▶ ON'}
+          </button>
+        </div>
         <div class="sub">dernier point : ${fmtTs(last.ts)}</div>
       </div>
       <div class="card">
@@ -163,9 +325,13 @@ function render(d) {
         <div class="sub">moy. ${num(last.grid_avg_w, ' W')}</div>
       </div>
       <div class="card">
+        <div class="label">Solaire (production)</div>
+        <div class="value">${num(last.pv_w, ' W')}</div>
+      </div>
+      <div class="card">
         <div class="label">Aujourd'hui</div>
         <div class="value">${fmtDur(d.today_sec)}</div>
-        <div class="sub">cible été : 2–8 h</div>
+        <div class="sub">${{'HAUTE':'cible : 4–8 h','MI':'cible : 1–4 h','BASSE':'cible : 0–2 h'}[last.mode] || 'cible : —'}</div>
       </div>
       <div class="card">
         <div class="label">Cette semaine</div>
@@ -180,8 +346,8 @@ function render(d) {
     <div class="section">
       <h2>Filtration sur 14 jours</h2>
       <table>
-        <thead><tr><th>Jour</th><th class="num">Durée</th><th style="width:50%">Répartition</th></tr></thead>
-        <tbody>${dailyRows || '<tr><td colspan="3" style="opacity:0.5">Aucune donnée</td></tr>'}</tbody>
+        <thead><tr><th>Jour</th><th class="num">Durée</th><th style="width:40%">Répartition</th><th class="num">☀️ PV produit</th><th class="num">💶 Pompe réseau</th></tr></thead>
+        <tbody>${dailyRows || '<tr><td colspan="5" style="opacity:0.5">Aucune donnée</td></tr>'}</tbody>
       </table>
     </div>
 
@@ -211,10 +377,91 @@ function render(d) {
     <div class="subtitle" style="margin-top:20px">
       ${d.total_events} évènements en base
     </div>
+
+    <div class="purge-box">
+      <label>🗑️ Supprimer les données avant le</label>
+      <input type="date" id="purgeDate">
+      <button onclick="doPurge()">Initialiser</button>
+      <span class="purge-msg" id="purgeMsg"></span>
+    </div>
+
+    <div class="settings-box">
+      <h2>⚙️ Paramètres — Seuils de pilotage</h2>
+      <p style="font-size:11px;opacity:0.6;margin:0 0 10px">
+        Seuil mini : grid moyen ≤ valeur → pompe démarre (surplus suffisant).<br>
+        Seuil maxi : grid moyen &gt; valeur → pompe s'arrête (surplus insuffisant).<br>
+        Quota mini : durée minimale de filtration journalière forcée entre 12 h et 17 h.<br>
+        Délai minimum entre deux bascules : 30 min (toujours actif).
+      </p>
+      <table class="seuil-table">
+        <thead>
+          <tr>
+            <th>Saison</th>
+            <th>Seuil mini (W)</th>
+            <th>Seuil maxi (W)</th>
+            <th>Quota mini (h)</th>
+            <th>Quota max (h)</th>
+          </tr>
+        </thead>
+        <tbody id="settingsBody">
+          <tr><td colspan="5" style="opacity:0.5">Chargement…</td></tr>
+        </tbody>
+      </table>
+      <button class="btn-save" onclick="saveSettings()">💾 Sauvegarder</button>
+      <span class="settings-msg" id="settingsMsg"></span>
+    </div>
   `;
   document.getElementById('app').innerHTML = html;
   document.getElementById('serverTime').textContent =
     'serveur : ' + fmtTs(d.server_time);
+  // Mise à jour des paramètres (seulement au 1er chargement ou si pas d'édition en cours)
+  if (d.config && !document.getElementById('settingsBody').dataset.edited) {
+    renderSettings(d.config);
+  }
+}
+
+async function doPurge() {
+  const dateInput = document.getElementById('purgeDate');
+  const msg = document.getElementById('purgeMsg');
+  const date = dateInput ? dateInput.value : '';
+  if (!date) { msg.textContent = '⚠️ Choisissez une date.'; msg.style.color='#ffb74d'; return; }
+  if (!confirm('Supprimer définitivement tous les évènements avant le ' + date + ' ?')) return;
+  msg.textContent = '…'; msg.style.color = '#e7ebf0';
+  try {
+    const r = await fetch('purge.php?before=' + date, {
+      method: 'GET',
+      headers: { 'X-Deploy-Token': '<?= htmlspecialchars($deployToken, ENT_QUOTES) ?>' }
+    });
+    const d = await r.json();
+    if (d.ok) {
+      msg.textContent = '✅ ' + d.deleted + ' évènements supprimés (' + d.remaining + ' restants)';
+      msg.style.color = '#4caf50';
+      refresh();
+    } else {
+      msg.textContent = '❌ ' + (d.error || 'erreur');
+      msg.style.color = '#f44336';
+    }
+  } catch(e) {
+    msg.textContent = '❌ ' + e.message;
+    msg.style.color = '#f44336';
+  }
+}
+
+async function setPump(on) {
+  const btn = document.getElementById('pumpBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const resp = await fetch('pump_control.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ on: on }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      console.warn('Pump toggle error:', err);
+    }
+  } catch(e) { console.warn('Pump toggle error:', e.message); }
+  setTimeout(refresh, 2500);
 }
 
 refresh();

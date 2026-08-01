@@ -4,6 +4,7 @@
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
+date_default_timezone_set('Europe/Paris');
 require_once __DIR__ . '/db.php';
 
 try {
@@ -23,9 +24,30 @@ try {
                 ->fetch(PDO::FETCH_ASSOC);
     $out['last_event'] = $last ?: null;
 
-    // Runtime du jour : max(daily_sec) parmi les évènements depuis minuit
-    $stmt = $pdo->prepare("SELECT COALESCE(MAX(daily_sec),0) FROM events WHERE ts >= :since");
-    $stmt->execute([':since' => $todayStart]);
+    // Runtime du jour : MAX(daily_sec) parmi les événements survenus APRÈS le premier
+    // reset (premier daily_sec=0 de la journée locale). Cela exclut les heartbeats
+    // "queue de la veille" envoyés juste après minuit avec encore le cumul d'hier.
+    // Si aucun reset n'a eu lieu aujourd'hui (pompe n'a pas encore tourné), on prend
+    // simplement le MAX brut.
+    $todayDate = date('Y-m-d');
+    $stmt = $pdo->prepare("
+        SELECT COALESCE(
+            (SELECT MAX(e.daily_sec)
+             FROM events e
+             WHERE strftime('%Y-%m-%d', e.ts, 'unixepoch', 'localtime') = :today
+               AND e.ts >= (
+                   SELECT MIN(ts) FROM events
+                   WHERE strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') = :today2
+                     AND daily_sec = 0
+               )
+            ),
+            (SELECT MAX(daily_sec) FROM events
+             WHERE strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') = :today3
+            ),
+            0
+        )
+    ");
+    $stmt->execute([':today' => $todayDate, ':today2' => $todayDate, ':today3' => $todayDate]);
     $out['today_sec'] = intval($stmt->fetchColumn());
 
     // Runtime semaine/mois : somme des max quotidiens
@@ -48,7 +70,9 @@ try {
     // Ventilation quotidienne sur 14 jours
     $stmt = $pdo->prepare("
         SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS day,
-               MAX(daily_sec) AS s
+               MAX(daily_sec) AS s,
+               ROUND(SUM(COALESCE(pv_wh_5m, 0))) AS pv_wh,
+               ROUND(SUM(COALESCE(pump_grid_wh_5m, 0))) AS pump_grid_wh
         FROM events
         WHERE ts >= :since
         GROUP BY day
@@ -56,6 +80,42 @@ try {
     ");
     $stmt->execute([':since' => $now - 14 * 86400]);
     $out['daily'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Patch : remplacer le MAX(daily_sec) d'aujourd'hui par la valeur corrigée
+    // (exclut les heartbeats "queue de la veille" envoyés juste après minuit)
+    foreach ($out['daily'] as &$row) {
+        if ($row['day'] === $todayDate) {
+            $row['s'] = strval($out['today_sec']);
+            break;
+        }
+    }
+    unset($row);
+
+    // Même correction pour week_sec et month_sec : soustraire l'écart sur aujourd'hui
+    $rawTodayMax = 0;
+    foreach ($out['daily'] as $row) {
+        if ($row['day'] === $todayDate) { $rawTodayMax = intval($row['s']); break; }
+    }
+    // (déjà patché, pas d'écart à corriger sur week/month — sumDaily utilise ts >= since
+    //  et prend MAX par jour ; on re-calcule proprement ci-dessous)
+    $sumDailyFixed = function(PDO $pdo, int $since, string $todayDate, int $todaySec): int {
+        $stmt = $pdo->prepare("
+            SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS day,
+                   MAX(daily_sec) AS s
+            FROM events
+            WHERE ts >= :since
+            GROUP BY day
+        ");
+        $stmt->execute([':since' => $since]);
+        $total = 0;
+        foreach ($stmt as $row) {
+            $s = ($row['day'] === $todayDate) ? $todaySec : intval($row['s']);
+            $total += $s;
+        }
+        return $total;
+    };
+    $out['week_sec']  = $sumDailyFixed($pdo, $weekStart,  $todayDate, $out['today_sec']);
+    $out['month_sec'] = $sumDailyFixed($pdo, $monthStart, $todayDate, $out['today_sec']);
 
     // 50 derniers évènements (tous types)
     $stmt = $pdo->query("
@@ -75,6 +135,12 @@ try {
         LIMIT 20
     ");
     $out['events'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Configuration (seuils)
+    $cfgRows = $pdo->query("SELECT key, value FROM config")->fetchAll(PDO::FETCH_ASSOC);
+    $cfgOut  = [];
+    foreach ($cfgRows as $row) { $cfgOut[$row['key']] = intval($row['value']); }
+    $out['config'] = $cfgOut;
 
     // Métadonnées
     $out['server_time'] = $now;

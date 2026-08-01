@@ -1,36 +1,51 @@
 // ============================================================
-//  Pilotage Pompe Piscine v2.2  -  Shelly Pro EM 50
-//  (v2.2 : 3 saisons avec seuils et quotas differencies)
+//  Pilotage Pompe Piscine v2.4  -  Shelly Pro EM 50
+//  (v2.4 : seuils mini/maxi configures depuis le NAS, fin de la
+//          detection de conflit remplacee par seuil_maxi)
 // ============================================================
-//  - Mesure : em1:0 (arrivee generale, signe Shelly standard)
-//        act_power > 0 : soutirage reseau
-//        act_power < 0 : injection reseau (surplus solaire)
+//  MATERIEL
+//  - Script execute sur : Shelly Pro EM 50 SPEM-002CEBEU50
+//                         IP 192.168.1.217
+//  - em1:0  -> arrivee generale (grid)
+//             act_power > 0 : soutirage reseau
+//             act_power < 0 : injection reseau (surplus solaire)
+//  - em1:1  -> panneaux solaires (PV)
+//  - Pompe  -> Shelly 1 Mini Gen3 S3SW-001X8EU, IP 192.168.1.239
 //
-//  - HAUTE saison (1 juin -> 31 aout) :
-//        Demarrage si export >= 300 W (grid <= -300)
+//  SAISONS ET QUOTAS
+//  - HAUTE (1 juin -> 31 aout) :
+//        Demarrage si gridMoy <= seuil_mini_haute (ex. -300 W)
+//        Arret    si gridMoy >  seuil_maxi_haute (ex. -50 W)
 //        Quota journalier : 4 h minimum, 8 h maximum
 //
-//  - MI-saison (2 mars -> 31 mai ET 1 sept -> 31 oct) :
-//        Demarrage si export >= 600 W (grid <= -600)
-//        Quota journalier : 1 h minimum, 8 h maximum
+//  - MI-SAISON (2 mars -> 31 mai ET 1 sept -> 31 oct) :
+//        Demarrage si gridMoy <= seuil_mini_mi (ex. -600 W)
+//        Arret    si gridMoy >  seuil_maxi_mi  (ex. -50 W)
+//        Quota journalier : 1 h minimum, 4 h maximum
 //
-//  - BASSE saison (1 nov -> 1 mars) :
-//        Demarrage si export >= 800 W (grid <= -800)
-//        Aucun quota minimum (filtration opportuniste seulement)
+//  - BASSE (1 nov -> 1 mars) :
+//        Demarrage si gridMoy <= seuil_mini_basse (ex. -800 W)
+//        Arret    si gridMoy >  seuil_maxi_basse  (ex. -50 W)
+//        Quota journalier : 0 h minimum, 2 h maximum
 //
-//  - Forcage quota mini : entre 12h et 17h si quota non atteint
-//        (ignore car pas de quota mini en basse saison)
+//  LOGIQUE
+//  - gridMoy = moyenne glissante sur 5 mesures (2,5 min @ 30 s/cycle)
 //
-//  - Conflit autre appareil (lave-linge, lave-vaisselle...) :
-//        Si la pompe tourne et que le reseau redevient soutireur
-//        pendant > 30 min, on arrete la pompe ;
-//        elle redemarrera quand le surplus reapparaitra.
-//        (Desactive pendant le forcage quota mini.)
+//  - Demarrage auto : pompe OFF + gridMoy <= seuil_mini + quota max
+//        non atteint + delai 30 min ecoule
+//
+//  - Arret auto     : pompe ON  + gridMoy > seuil_maxi + delai 30 min ecoule
+//        (arret immediat si quota max atteint, sans delai)
+//
+//  - Forcage quota mini : entre 12h et 17h si quota mini non atteint
+//        (ignore en basse saison : pas de quota mini)
 //
 //  - Securite materiel : 30 min mini entre 2 bascules ON/OFF.
 //
 //  - Detection commande manuelle : si l'etat reel de la pompe
 //        differe de l'etat connu, le delai mini est etendu a 2 h.
+//
+//  - Rafraichissement config NAS : au demarrage puis toutes les heures.
 // ============================================================
 
 // ---- CONFIGURATION ----------------------------------------
@@ -44,22 +59,25 @@ let CFG = {
   pumpId: 0,
   pumpPowerW: 800,
 
-  // Seuils et quotas par saison (grid en W, signe Shelly standard)
-  // Calcules dynamiquement dans seasonInfo(comp) a partir du mois/jour
-  // HAUTE : grid <= -300 W, mini 4 h
-  // MI    : grid <= -600 W, mini 1 h
-  // BASSE : grid <= -800 W, pas de mini
-  conflictGrid: 50,              // grid > 50 W => on tire au reseau
+  // Seuils par saison - valeurs par defaut (ecrasees apres fetchConfig)
+  // Demarrage (pompe OFF) : gridMoy <= seuilMini
+  // Arret     (pompe ON)  : gridMoy >  seuilMaxi
+  seuilMiniHaute: -300,
+  seuilMaxiHaute: -50,
+  seuilMiniMi:    -600,
+  seuilMaxiMi:    -50,
+  seuilMiniBasse: -800,
+  seuilMaxiBasse: -50,
 
   // Temporisations (s)
   cycleSec: 30,                  // periode boucle
   minSwitchDelay: 30 * 60,       // 30 min entre 2 bascules
   manualSwitchDelay: 2 * 3600,   // 2 h apres une commande manuelle
-  conflictHoldSec: 30 * 60,      // 30 min de conflit avant arret
   startAvgWindow: 5,             // moyenne glissante sur 5 mesures (2,5 min)
+  configRefreshCycles: 120,      // rafraichir config NAS toutes les heures (120 * 30s)
 
-  // Quota max commun et creneau de forcage
-  dailyMaxSec: 8 * 3600,         // 8 h maximum
+  // Quota max par defaut (HAUTE saison) et creneau de forcage
+  dailyMaxSec: 8 * 3600,         // 8 h maximum (HAUTE)
   forceStartHour: 12,            // forcage si quota mini non atteint
   forceEndHour: 17,              // limite haute du forcage
 
@@ -91,19 +109,44 @@ let RemoteShelly = {
 };
 let pump = RemoteShelly.getInstance(CFG.pumpAddr);
 
+// ---- LECTURE CONFIG NAS -----------------------------------
+function fetchConfig(callback) {
+  let url = CFG.reportUrl.replace("log.php", "config.php");
+  Shelly.call("HTTP.GET", { url: url }, function (result, error_code) {
+    if (error_code === 0 && result && result.code === 200) {
+      try {
+        let c = JSON.parse(result.body);
+        if (typeof c.seuil_mini_haute === "number") CFG.seuilMiniHaute = c.seuil_mini_haute;
+        if (typeof c.seuil_maxi_haute === "number") CFG.seuilMaxiHaute = c.seuil_maxi_haute;
+        if (typeof c.seuil_mini_mi    === "number") CFG.seuilMiniMi    = c.seuil_mini_mi;
+        if (typeof c.seuil_maxi_mi    === "number") CFG.seuilMaxiMi    = c.seuil_maxi_mi;
+        if (typeof c.seuil_mini_basse === "number") CFG.seuilMiniBasse = c.seuil_mini_basse;
+        if (typeof c.seuil_maxi_basse === "number") CFG.seuilMaxiBasse = c.seuil_maxi_basse;
+        print("[CFG ] mini(H/M/B)=" + CFG.seuilMiniHaute + "/" + CFG.seuilMiniMi + "/" + CFG.seuilMiniBasse +
+              " maxi(H/M/B)=" + CFG.seuilMaxiHaute + "/" + CFG.seuilMaxiMi + "/" + CFG.seuilMaxiBasse);
+      } catch (e) {
+        print("[CFG ] erreur parsing: " + e);
+      }
+    } else {
+      print("[CFG ] fetch KO code=" + (result ? result.code : error_code));
+    }
+    if (callback) callback();
+  });
+}
+
 // ---- ETAT GLOBAL ------------------------------------------
 let st = {
   pumpIsOn: false,
   lastSwitchTime: 0,
   currentMinDelay: 30 * 60,
   history: [],                  // mesures grid recentes
-  conflictStart: 0,             // 0 = pas de conflit en cours
-  conflictReported: false,      // pour n'envoyer conflict_start qu'une fois
   dailyRunSec: 0,               // cumul ON deja consolide
   dayKey: 0,                    // jour julien local
   pumpOnStartTs: 0,             // debut de la session ON courante
   rpcBusy: false,               // garde anti-reentree Switch.Set
-  tickCount: 0,                 // compteur de ticks pour heartbeat
+  tickCount: 0,                 // compteur de ticks pour heartbeat/config
+  pvWhAccum: 0.0,               // energie PV accumulee depuis le dernier heartbeat (Wh)
+  pumpGridWhAccum: 0.0,         // energie reseau pompe accumulee depuis le dernier heartbeat (Wh)
 };
 
 // ---- REPORTING VERS NAS -----------------------------------
@@ -112,7 +155,8 @@ function reportCb(result, error_code, error_message) {
     print("[RPT ] erreur code=" + error_code);
   }
 }
-function report(type, reason) {
+// extras : objet optionnel de champs supplementaires (ex: {pv_wh_5m, pump_grid_wh_5m})
+function report(type, reason, extras) {
   if (!CFG.reportEnabled) return;
   let now = Shelly.getComponentStatus("sys").unixtime;
   let s = Shelly.getComponentStatus(CFG.measureComponent + ":" + CFG.measureId);
@@ -133,6 +177,9 @@ function report(type, reason) {
     daily_sec: runningSec,
     reason: reason || "",
   };
+  if (extras) {
+    for (let k in extras) { payload[k] = extras[k]; }
+  }
   Shelly.call("HTTP.POST", {
     url: CFG.reportUrl,
     body: JSON.stringify(payload),
@@ -163,26 +210,36 @@ function localComponents(unixUtc) {
     days -= mdays[i];
   }
   let day = days + 1;
-  let hour = Math.floor(secOfDay / 3600);
-  return { year: year, month: month, day: day, hour: hour, dayKey: dayKey };
+  let hour   = Math.floor(secOfDay / 3600);
+  let minute = Math.floor((secOfDay % 3600) / 60);
+  let second = secOfDay % 60;
+  return { year: year, month: month, day: day,
+           hour: hour, minute: minute, second: second,
+           dayKey: dayKey };
 }
 
 // Retourne les parametres de la saison courante :
-//   { name: "HAUTE"|"MI"|"BASSE", startGrid: W, dailyMinSec: s }
+//   { name, startGrid (seuil_mini), stopGrid (seuil_maxi), dailyMinSec, dailyMaxSec }
 function seasonInfo(comp) {
   let m = comp.month;
   let d = comp.day;
   // HAUTE : 1 juin -> 31 aout
   if (m >= 6 && m <= 8) {
-    return { name: "HAUTE", startGrid: -300, dailyMinSec: 4 * 3600 };
+    return { name: "HAUTE",
+             startGrid: CFG.seuilMiniHaute, stopGrid: CFG.seuilMaxiHaute,
+             dailyMinSec: 4 * 3600, dailyMaxSec: 8 * 3600 };
   }
   // MI : 2 mars -> 31 mai  ET  1 sept -> 31 oct
   if ((m === 3 && d >= 2) || m === 4 || m === 5 ||
       m === 9 || m === 10) {
-    return { name: "MI", startGrid: -600, dailyMinSec: 1 * 3600 };
+    return { name: "MI",
+             startGrid: CFG.seuilMiniMi, stopGrid: CFG.seuilMaxiMi,
+             dailyMinSec: 1 * 3600, dailyMaxSec: 4 * 3600 };
   }
   // BASSE : reste (1 nov -> 1 mars inclus)
-  return { name: "BASSE", startGrid: -800, dailyMinSec: 0 };
+  return { name: "BASSE",
+           startGrid: CFG.seuilMiniBasse, stopGrid: CFG.seuilMaxiBasse,
+           dailyMinSec: 0, dailyMaxSec: 2 * 3600 };
 }
 
 // ---- HISTORIQUE MESURES -----------------------------------
@@ -218,8 +275,6 @@ function setPump(on, reason) {
     st.pumpIsOn = on;
     st.lastSwitchTime = now;
     st.currentMinDelay = CFG.minSwitchDelay;
-    st.conflictStart = 0;
-    st.conflictReported = false;
     print((on ? "[ON ] " : "[OFF] ") + reason);
     report(on ? "on" : "off", reason);
   });
@@ -229,7 +284,7 @@ function setPump(on, reason) {
 function initPumpState(callback) {
   pump.call("Switch.GetStatus", { id: CFG.pumpId }, function (res, code) {
     if (code === 200) {
-      st.pumpIsOn = res.output;
+      st.pumpIsOn = !!res.output;
       let now = Shelly.getComponentStatus("sys").unixtime;
       st.lastSwitchTime = now;
       if (st.pumpIsOn) st.pumpOnStartTs = now;
@@ -249,12 +304,7 @@ function tick() {
   let now = sys.unixtime;
   let comp = localComponents(now);
 
-  // Heartbeat periodique vers le NAS
-  if ((st.tickCount % CFG.heartbeatCycles) === 0) {
-    report("heartbeat", "");
-  }
-
-  // Reset compteur journalier
+  // Reset compteur journalier (avant le heartbeat pour ne pas envoyer le cumul de la veille)
   if (st.dayKey !== comp.dayKey) {
     if (st.dayKey !== 0) {
       let totalYesterday = st.dailyRunSec +
@@ -266,6 +316,10 @@ function tick() {
     if (st.pumpIsOn) st.pumpOnStartTs = now;
   }
 
+  // Marquer si ce tick doit emettre un heartbeat ou rafraichir la config
+  let isHeartbeatTick = (st.tickCount % CFG.heartbeatCycles) === 0;
+  let isConfigTick    = (st.tickCount % CFG.configRefreshCycles) === 0 && st.tickCount > 0;
+
   // Lecture pompe (detection commande manuelle)
   pump.call("Switch.GetStatus", { id: CFG.pumpId }, function (res, code) {
     if (code !== 200) {
@@ -273,95 +327,99 @@ function tick() {
       return;
     }
 
-    if (res.output !== st.pumpIsOn) {
+    // Normaliser en booleen strict pour eviter les comparaisons strictes
+    // entre boolean (setPump) et integer (res.output du Shelly Mini)
+    let realOn = !!res.output;
+    if (realOn !== st.pumpIsOn) {
       print("[MAN ] Commande manuelle detectee");
-      if (res.output && !st.pumpIsOn) {
+      if (realOn && !st.pumpIsOn) {
         st.pumpOnStartTs = now;
-      } else if (!res.output && st.pumpIsOn && st.pumpOnStartTs > 0) {
+      } else if (!realOn && st.pumpIsOn && st.pumpOnStartTs > 0) {
         st.dailyRunSec += (now - st.pumpOnStartTs);
         st.pumpOnStartTs = 0;
       }
-      st.pumpIsOn = res.output;
+      st.pumpIsOn = realOn;
       st.lastSwitchTime = now;
       st.currentMinDelay = CFG.manualSwitchDelay;
-      st.conflictStart = 0;
-      st.conflictReported = false;
-      report("manual", "etat reel: " + (res.output ? "ON" : "OFF"));
+      report("manual", "etat reel: " + (realOn ? "ON" : "OFF"));
     }
 
-    // Lecture grid
+    // Lecture grid et PV
     let s = Shelly.getComponentStatus(CFG.measureComponent + ":" + CFG.measureId);
     if (!s || typeof s.act_power === "undefined") {
       print("[WARN] act_power indispo");
       return;
     }
     let grid = s.act_power;
+    let pvComp = Shelly.getComponentStatus(CFG.pvComponent + ":" + CFG.pvId);
+    let pvW = (pvComp && typeof pvComp.act_power === "number") ? pvComp.act_power : null;
     pushHistory(grid);
     let gridAvg = avgHistory();
+
+    // Accumulation energie sur 30 s (un tick)
+    if (pvW !== null) { st.pvWhAccum += pvW * 30.0 / 3600.0; }
+    if (st.pumpIsOn && grid > 0) { st.pumpGridWhAccum += grid * 30.0 / 3600.0; }
+
+    // Heartbeat : envoyer les accumulations puis remettre a zero
+    if (isHeartbeatTick) {
+      report("heartbeat", "", {
+        pv_wh_5m:        Math.round(st.pvWhAccum       * 10) / 10,
+        pump_grid_wh_5m: Math.round(st.pumpGridWhAccum * 10) / 10,
+      });
+      st.pvWhAccum       = 0.0;
+      st.pumpGridWhAccum = 0.0;
+    }
+
+    // Rafraichissement config NAS (toutes les heures, non bloquant)
+    if (isConfigTick) {
+      fetchConfig(null);
+    }
 
     let season = seasonInfo(comp);
     let modeName = season.name;
     let startTh = season.startGrid;
+    let stopTh  = season.stopGrid;
     let dailyMin = season.dailyMinSec;
 
     // Cumul journalier en temps reel
     let runningSec = st.dailyRunSec +
       (st.pumpIsOn && st.pumpOnStartTs > 0 ? (now - st.pumpOnStartTs) : 0);
 
-    print("[" + modeName + "] grid=" + Math.round(grid) +
+    let hhmm = (comp.hour   < 10 ? "0" : "") + comp.hour   + ":" +
+               (comp.minute < 10 ? "0" : "") + comp.minute + ":" +
+               (comp.second < 10 ? "0" : "") + comp.second;
+    print("[" + modeName + "|" + hhmm + "] grid=" + Math.round(grid) +
           "W avg=" + Math.round(gridAvg) +
           "W pompe=" + (st.pumpIsOn ? "ON " : "OFF") +
-          " jour=" + Math.floor(runningSec / 60) + "min" +
-          " h=" + comp.hour);
+          " jour=" + Math.floor(runningSec / 60) + "min");
 
-    // ---------- Stop imperatif : quota max 8 h ----------
-    if (st.pumpIsOn && runningSec >= CFG.dailyMaxSec) {
-      if ((now - st.lastSwitchTime) >= st.currentMinDelay) {
-        setPump(false, "quota max 8h atteint");
+    // ---------- Stop imperatif : quota max par saison (sans delai) ----------
+    if (st.pumpIsOn && runningSec >= season.dailyMaxSec) {
+      setPump(false, "quota max " + Math.floor(season.dailyMaxSec / 3600) +
+                     "h atteint (" + modeName + ")");
+      return;
+    }
+
+    // ---------- Delai mini entre bascules ----------
+    let delayOk = (now - st.lastSwitchTime) >= st.currentMinDelay;
+
+    // ---------- Arret : fin du surplus (seuil_maxi) ----------
+    if (st.pumpIsOn && gridAvg > stopTh) {
+      if (delayOk) {
+        setPump(false, "fin surplus " + modeName +
+                       " (avg=" + Math.round(gridAvg) + "W > " + stopTh + "W)");
       }
       return;
     }
 
-    // ---------- Conflit autre appareil ----------
+    if (!delayOk) return;
+
+    // ---------- Forcage quota mini saison ----------
     let inForceWindow = dailyMin > 0 &&
                         runningSec < dailyMin &&
                         comp.hour >= CFG.forceStartHour &&
                         comp.hour < CFG.forceEndHour;
 
-    if (st.pumpIsOn && grid > CFG.conflictGrid) {
-      if (st.conflictStart === 0) {
-        st.conflictStart = now;
-        st.conflictReported = false;
-        print("[CONF] Debut conflit (grid>" + CFG.conflictGrid + "W)");
-        report("conflict_start", "grid=" + Math.round(grid) + "W");
-      } else {
-        let confDur = now - st.conflictStart;
-        if (confDur >= CFG.conflictHoldSec) {
-          if (inForceWindow) {
-            print("[CONF] " + Math.floor(confDur/60) +
-                  "min mais forcage quota mini actif -> on garde ON");
-          } else if ((now - st.lastSwitchTime) >= st.currentMinDelay) {
-            setPump(false, "conflit autre appareil " +
-                           Math.floor(confDur/60) + " min");
-            return;
-          }
-        }
-      }
-    } else if (st.conflictStart !== 0) {
-      print("[CONF] Conflit termine");
-      report("conflict_end", "duree " +
-             Math.floor((now - st.conflictStart) / 60) + " min");
-      st.conflictStart = 0;
-      st.conflictReported = false;
-    }
-
-    // ---------- Delai mini entre bascules ----------
-    if ((now - st.lastSwitchTime) < st.currentMinDelay) {
-      // delai actif : on ne peut ni demarrer ni arreter
-      return;
-    }
-
-    // ---------- Forcage quota mini saison ----------
     if (!st.pumpIsOn && inForceWindow) {
       setPump(true, "forcage quota mini " +
                     Math.floor(dailyMin / 3600) + "h " +
@@ -369,20 +427,23 @@ function tick() {
       return;
     }
 
-    // ---------- Demarrage normal sur surplus ----------
+    // ---------- Demarrage normal sur surplus (seuil_mini) ----------
     if (!st.pumpIsOn &&
+        runningSec < season.dailyMaxSec &&
         st.history.length >= CFG.startAvgWindow &&
         gridAvg <= startTh) {
       setPump(true, "surplus solaire " + modeName +
-                    " (avg=" + Math.round(gridAvg) + "W)");
+                    " (avg=" + Math.round(gridAvg) + "W <= " + startTh + "W)");
       return;
     }
   });
 }
 
 // ---- DEMARRAGE --------------------------------------------
-print("=== Pompe Piscine v2.0 ===");
-initPumpState(function () {
-  Timer.set(CFG.cycleSec * 1000, true, tick);
-  tick();
+print("=== Pompe Piscine v2.4 ===");
+fetchConfig(function () {
+  initPumpState(function () {
+    Timer.set(CFG.cycleSec * 1000, true, tick);
+    tick();
+  });
 });
