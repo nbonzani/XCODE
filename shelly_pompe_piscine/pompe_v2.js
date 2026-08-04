@@ -1,7 +1,8 @@
 // ============================================================
-//  Pilotage Pompe Piscine v2.4  -  Shelly Pro EM 50
-//  (v2.4 : seuils mini/maxi configures depuis le NAS, fin de la
-//          detection de conflit remplacee par seuil_maxi)
+//  Pilotage Pompe Piscine v2.5  -  Shelly Pro EM 50
+//  (v2.5 : moyenne glissante calculee depuis le dernier changement
+//          d'etat (et non sur 5 mesures fixes), et forcage quota mini
+//          desormais prioritaire sur l'arret "fin de surplus")
 // ============================================================
 //  MATERIEL
 //  - Script execute sur : Shelly Pro EM 50 SPEM-002CEBEU50
@@ -29,7 +30,11 @@
 //        Quota journalier : 0 h minimum, 2 h maximum
 //
 //  LOGIQUE
-//  - gridMoy = moyenne glissante sur 5 mesures (2,5 min @ 30 s/cycle)
+//  - gridMoy = moyenne de toutes les mesures depuis le dernier changement
+//        d'etat de la pompe (pas une fenetre fixe) : ca lisse l'appel de
+//        puissance de la pompe elle-meme au demarrage, qui sinon fait
+//        osciller gridMoy au-dessus du seuil d'arret. Minimum 5 mesures
+//        (2,5 min) avant de faire confiance a la moyenne pour demarrer.
 //
 //  - Demarrage auto : pompe OFF + gridMoy <= seuil_mini + quota max
 //        non atteint + delai 30 min ecoule
@@ -37,8 +42,10 @@
 //  - Arret auto     : pompe ON  + gridMoy > seuil_maxi + delai 30 min ecoule
 //        (arret immediat si quota max atteint, sans delai)
 //
-//  - Forcage quota mini : entre 12h et 17h si quota mini non atteint
-//        (ignore en basse saison : pas de quota mini)
+//  - Forcage quota mini : entre 12h et 17h si quota mini non atteint,
+//        la pompe tourne (demarre si besoin) independamment du surplus -
+//        prioritaire sur l'arret "fin de surplus" (mais pas sur le quota
+//        max). Ignore en basse saison : pas de quota mini.
 //
 //  - Securite materiel : 30 min mini entre 2 bascules ON/OFF.
 //
@@ -73,7 +80,8 @@ let CFG = {
   cycleSec: 30,                  // periode boucle
   minSwitchDelay: 30 * 60,       // 30 min entre 2 bascules
   manualSwitchDelay: 2 * 3600,   // 2 h apres une commande manuelle
-  startAvgWindow: 5,             // moyenne glissante sur 5 mesures (2,5 min)
+  startAvgWindow: 5,             // nb mini de mesures depuis le dernier changement
+                                  // d'etat avant de faire confiance a la moyenne (2,5 min)
   configRefreshCycles: 120,      // rafraichir config NAS toutes les heures (120 * 30s)
 
   // Quota max par defaut (HAUTE saison) et creneau de forcage
@@ -139,7 +147,8 @@ let st = {
   pumpIsOn: false,
   lastSwitchTime: 0,
   currentMinDelay: 30 * 60,
-  history: [],                  // mesures grid recentes
+  avgSum: 0,                     // somme des mesures grid depuis le dernier changement d'etat
+  avgCount: 0,                   // nombre de mesures accumulees dans avgSum
   dailyRunSec: 0,               // cumul ON deja consolide
   dayKey: 0,                    // jour julien local
   pumpOnStartTs: 0,             // debut de la session ON courante
@@ -242,16 +251,22 @@ function seasonInfo(comp) {
            dailyMinSec: 0, dailyMaxSec: 2 * 3600 };
 }
 
-// ---- HISTORIQUE MESURES -----------------------------------
+// ---- MOYENNE DEPUIS LE DERNIER CHANGEMENT D'ETAT -----------
+// La moyenne glissante est calculee sur TOUTES les mesures depuis la
+// derniere bascule ON/OFF (et non sur une fenetre fixe de N mesures) :
+// ca lisse correctement l'appel de puissance de la pompe elle-meme,
+// qui sinon fait osciller gridAvg au-dessus du seuil d'arret des que
+// le solaire ne couvre pas tout a fait sa consommation.
+function resetAvg() {
+  st.avgSum = 0;
+  st.avgCount = 0;
+}
 function pushHistory(p) {
-  st.history.push(p);
-  while (st.history.length > CFG.startAvgWindow) st.history.splice(0, 1);
+  st.avgSum += p;
+  st.avgCount += 1;
 }
 function avgHistory() {
-  if (st.history.length === 0) return 0;
-  let s = 0;
-  for (let i = 0; i < st.history.length; i++) s += st.history[i];
-  return s / st.history.length;
+  return st.avgCount > 0 ? st.avgSum / st.avgCount : 0;
 }
 
 // ---- COMMANDE POMPE ---------------------------------------
@@ -275,6 +290,7 @@ function setPump(on, reason) {
     st.pumpIsOn = on;
     st.lastSwitchTime = now;
     st.currentMinDelay = CFG.minSwitchDelay;
+    resetAvg();
     print((on ? "[ON ] " : "[OFF] ") + reason);
     report(on ? "on" : "off", reason);
   });
@@ -341,6 +357,7 @@ function tick() {
       st.pumpIsOn = realOn;
       st.lastSwitchTime = now;
       st.currentMinDelay = CFG.manualSwitchDelay;
+      resetAvg();
       report("manual", "etat reel: " + (realOn ? "ON" : "OFF"));
     }
 
@@ -400,11 +417,22 @@ function tick() {
       return;
     }
 
+    // ---------- Forcage quota mini saison ----------
+    // Tant que le quota mini n'est pas atteint et qu'on est dans le creneau
+    // horaire, la pompe tourne (ou demarre) independamment du surplus/grid :
+    // le forcage a priorite sur la regle d'arret "fin de surplus" ci-dessous.
+    let inForceWindow = dailyMin > 0 &&
+                        runningSec < dailyMin &&
+                        comp.hour >= CFG.forceStartHour &&
+                        comp.hour < CFG.forceEndHour;
+
     // ---------- Delai mini entre bascules ----------
     let delayOk = (now - st.lastSwitchTime) >= st.currentMinDelay;
 
     // ---------- Arret : fin du surplus (seuil_maxi) ----------
-    if (st.pumpIsOn && gridAvg > stopTh) {
+    // Ignore si le forcage quota mini est actif : on ne coupe pas la pompe
+    // en cours de forcage, elle tourne jusqu'a atteindre le quota mini.
+    if (st.pumpIsOn && !inForceWindow && gridAvg > stopTh) {
       if (delayOk) {
         setPump(false, "fin surplus " + modeName +
                        " (avg=" + Math.round(gridAvg) + "W > " + stopTh + "W)");
@@ -413,12 +441,6 @@ function tick() {
     }
 
     if (!delayOk) return;
-
-    // ---------- Forcage quota mini saison ----------
-    let inForceWindow = dailyMin > 0 &&
-                        runningSec < dailyMin &&
-                        comp.hour >= CFG.forceStartHour &&
-                        comp.hour < CFG.forceEndHour;
 
     if (!st.pumpIsOn && inForceWindow) {
       setPump(true, "forcage quota mini " +
@@ -430,7 +452,7 @@ function tick() {
     // ---------- Demarrage normal sur surplus (seuil_mini) ----------
     if (!st.pumpIsOn &&
         runningSec < season.dailyMaxSec &&
-        st.history.length >= CFG.startAvgWindow &&
+        st.avgCount >= CFG.startAvgWindow &&
         gridAvg <= startTh) {
       setPump(true, "surplus solaire " + modeName +
                     " (avg=" + Math.round(gridAvg) + "W <= " + startTh + "W)");
@@ -440,7 +462,7 @@ function tick() {
 }
 
 // ---- DEMARRAGE --------------------------------------------
-print("=== Pompe Piscine v2.4 ===");
+print("=== Pompe Piscine v2.5 ===");
 fetchConfig(function () {
   initPumpState(function () {
     Timer.set(CFG.cycleSec * 1000, true, tick);
