@@ -1,8 +1,8 @@
 // ============================================================
-//  Pilotage Pompe Piscine v2.5  -  Shelly Pro EM 50
-//  (v2.5 : moyenne glissante calculee depuis le dernier changement
-//          d'etat (et non sur 5 mesures fixes), et forcage quota mini
-//          desormais prioritaire sur l'arret "fin de surplus")
+//  Pilotage Pompe Piscine v2.6  -  Shelly Pro EM 50
+//  (v2.6 : moyenne glissante sur fenetre temporelle de 10 min quand
+//          la pompe est OFF ; moyenne depuis le dernier changement
+//          d'etat conservee quand la pompe est ON)
 // ============================================================
 //  MATERIEL
 //  - Script execute sur : Shelly Pro EM 50 SPEM-002CEBEU50
@@ -30,11 +30,15 @@
 //        Quota journalier : 0 h minimum, 2 h maximum
 //
 //  LOGIQUE
-//  - gridMoy = moyenne de toutes les mesures depuis le dernier changement
-//        d'etat de la pompe (pas une fenetre fixe) : ca lisse l'appel de
-//        puissance de la pompe elle-meme au demarrage, qui sinon fait
-//        osciller gridMoy au-dessus du seuil d'arret. Minimum 5 mesures
-//        (2,5 min) avant de faire confiance a la moyenne pour demarrer.
+//  - gridMoy : deux modes de calcul selon l'etat de la pompe -
+//        * Pompe OFF : moyenne glissante sur une fenetre temporelle de
+//          10 min (reactif, pour detecter un surplus qui apparait).
+//        * Pompe ON  : moyenne de toutes les mesures depuis le dernier
+//          changement d'etat (pas une fenetre fixe) : ca lisse l'appel
+//          de puissance de la pompe elle-meme, qui sinon fait osciller
+//          gridMoy au-dessus du seuil d'arret.
+//        Dans les deux cas, minimum 5 mesures (2,5 min) avant de faire
+//        confiance a la moyenne pour demarrer.
 //
 //  - Demarrage auto : pompe OFF + gridMoy <= seuil_mini + quota max
 //        non atteint + delai 30 min ecoule
@@ -80,8 +84,8 @@ let CFG = {
   cycleSec: 30,                  // periode boucle
   minSwitchDelay: 30 * 60,       // 30 min entre 2 bascules
   manualSwitchDelay: 2 * 3600,   // 2 h apres une commande manuelle
-  startAvgWindow: 5,             // nb mini de mesures depuis le dernier changement
-                                  // d'etat avant de faire confiance a la moyenne (2,5 min)
+  startAvgWindow: 5,             // nb mini de mesures avant de faire confiance a la moyenne (2,5 min)
+  offAvgWindowSec: 10 * 60,      // fenetre glissante temporelle utilisee quand la pompe est OFF
   configRefreshCycles: 120,      // rafraichir config NAS toutes les heures (120 * 30s)
 
   // Quota max par defaut (HAUTE saison) et creneau de forcage
@@ -147,8 +151,9 @@ let st = {
   pumpIsOn: false,
   lastSwitchTime: 0,
   currentMinDelay: 30 * 60,
-  avgSum: 0,                     // somme des mesures grid depuis le dernier changement d'etat
+  avgSum: 0,                     // somme des mesures grid depuis le dernier changement d'etat (utilise si ON)
   avgCount: 0,                   // nombre de mesures accumulees dans avgSum
+  offHistory: [],                 // {t, g} des mesures des 10 dernieres min (utilise si OFF)
   dailyRunSec: 0,               // cumul ON deja consolide
   dayKey: 0,                    // jour julien local
   pumpOnStartTs: 0,             // debut de la session ON courante
@@ -251,22 +256,41 @@ function seasonInfo(comp) {
            dailyMinSec: 0, dailyMaxSec: 2 * 3600 };
 }
 
-// ---- MOYENNE DEPUIS LE DERNIER CHANGEMENT D'ETAT -----------
-// La moyenne glissante est calculee sur TOUTES les mesures depuis la
-// derniere bascule ON/OFF (et non sur une fenetre fixe de N mesures) :
-// ca lisse correctement l'appel de puissance de la pompe elle-meme,
-// qui sinon fait osciller gridAvg au-dessus du seuil d'arret des que
-// le solaire ne couvre pas tout a fait sa consommation.
+// ---- MOYENNE GLISSANTE --------------------------------------
+// Pompe OFF : fenetre temporelle de 10 min (reactif, pour detecter un
+//             surplus qui vient d'apparaitre).
+// Pompe ON  : moyenne de TOUTES les mesures depuis la derniere bascule
+//             (pas une fenetre fixe) : ca lisse correctement l'appel de
+//             puissance de la pompe elle-meme, qui sinon fait osciller
+//             gridAvg au-dessus du seuil d'arret des que le solaire ne
+//             couvre pas tout a fait sa consommation.
 function resetAvg() {
   st.avgSum = 0;
   st.avgCount = 0;
+  // Vide aussi la fenetre OFF : sinon, juste apres un arret, elle contient
+  // encore des mesures prises pendant que la pompe tournait (avg fausse
+  // a la hausse pendant les 10 min suivantes).
+  st.offHistory = [];
 }
-function pushHistory(p) {
+function pushHistory(now, p) {
+  // Accumulateur "depuis le dernier changement d'etat" (pompe ON)
   st.avgSum += p;
   st.avgCount += 1;
+  // Fenetre glissante temporelle des 10 dernieres minutes (pompe OFF)
+  st.offHistory.push({ t: now, g: p });
+  while (st.offHistory.length && (now - st.offHistory[0].t) > CFG.offAvgWindowSec) {
+    st.offHistory.shift();
+  }
+}
+function avgOffWindow() {
+  if (st.offHistory.length === 0) return 0;
+  let s = 0;
+  for (let i = 0; i < st.offHistory.length; i++) s += st.offHistory[i].g;
+  return s / st.offHistory.length;
 }
 function avgHistory() {
-  return st.avgCount > 0 ? st.avgSum / st.avgCount : 0;
+  if (st.pumpIsOn) return st.avgCount > 0 ? st.avgSum / st.avgCount : 0;
+  return avgOffWindow();
 }
 
 // ---- COMMANDE POMPE ---------------------------------------
@@ -370,7 +394,7 @@ function tick() {
     let grid = s.act_power;
     let pvComp = Shelly.getComponentStatus(CFG.pvComponent + ":" + CFG.pvId);
     let pvW = (pvComp && typeof pvComp.act_power === "number") ? pvComp.act_power : null;
-    pushHistory(grid);
+    pushHistory(now, grid);
     let gridAvg = avgHistory();
 
     // Accumulation energie sur 30 s (un tick)
@@ -452,7 +476,7 @@ function tick() {
     // ---------- Demarrage normal sur surplus (seuil_mini) ----------
     if (!st.pumpIsOn &&
         runningSec < season.dailyMaxSec &&
-        st.avgCount >= CFG.startAvgWindow &&
+        st.offHistory.length >= CFG.startAvgWindow &&
         gridAvg <= startTh) {
       setPump(true, "surplus solaire " + modeName +
                     " (avg=" + Math.round(gridAvg) + "W <= " + startTh + "W)");
@@ -462,7 +486,7 @@ function tick() {
 }
 
 // ---- DEMARRAGE --------------------------------------------
-print("=== Pompe Piscine v2.5 ===");
+print("=== Pompe Piscine v2.6 ===");
 fetchConfig(function () {
   initPumpState(function () {
     Timer.set(CFG.cycleSec * 1000, true, tick);
