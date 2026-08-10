@@ -1,8 +1,8 @@
 // ============================================================
-//  Pilotage Pompe Piscine v2.6  -  Shelly Pro EM 50
-//  (v2.6 : moyenne glissante sur fenetre temporelle de 10 min quand
-//          la pompe est OFF ; moyenne depuis le dernier changement
-//          d'etat conservee quand la pompe est ON)
+//  Pilotage Pompe Piscine v2.6.1  -  Shelly Pro EM 50
+//  (v2.6.1 : corrige un plantage du script ~10 min apres chaque
+//            demarrage - Array.shift() n'est pas supporte par le
+//            moteur mJS du Shelly, remplace par splice(0,1))
 // ============================================================
 //  MATERIEL
 //  - Script execute sur : Shelly Pro EM 50 SPEM-002CEBEU50
@@ -279,7 +279,7 @@ function pushHistory(now, p) {
   // Fenetre glissante temporelle des 10 dernieres minutes (pompe OFF)
   st.offHistory.push({ t: now, g: p });
   while (st.offHistory.length && (now - st.offHistory[0].t) > CFG.offAvgWindowSec) {
-    st.offHistory.shift();
+    st.offHistory.splice(0, 1);
   }
 }
 function avgOffWindow() {
@@ -486,7 +486,7 @@ function tick() {
 }
 
 // ---- DEMARRAGE --------------------------------------------
-print("=== Pompe Piscine v2.6 ===");
+print("=== Pompe Piscine v2.6.1 ===");
 fetchConfig(function () {
   initPumpState(function () {
     Timer.set(CFG.cycleSec * 1000, true, tick);
